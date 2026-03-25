@@ -3,12 +3,24 @@
 
   var STORAGE_V1 = "sorteio-cartela-v1";
   var STORAGE_V2 = "sorteio-cartela-v2";
+  var SESSION_ADMIN_KEY = "sorteio-admin-session";
 
-  /** @type {{ cartelas: Array<{ id: string, title: string, total: number, precoPadrao: number, promocoes: Array<{ id: string, qtd: number, valorTotal: number }>, vendas: Record<string, { nome: string, pago: boolean, valor: number }>, createdAt: number }>, activeId: string | null }} */
+  /** @type {{ cartelas: Array<{ id: string, title: string, total: number, precoPadrao: number, promocoes: Array<{ id: string, qtd: number, valorTotal: number }>, vendas: Record<string, { nome: string, pago: boolean, valor: number }>, createdAt: number }>, activeId: string | null, settings: { adminPwHash: string | null, pixChave: string, pixNome: string, pixCidade: string } }} */
   var store = {
     cartelas: [],
     activeId: null,
+    settings: {
+      adminPwHash: null,
+      pixChave: "",
+      pixNome: "",
+      pixCidade: "",
+    },
   };
+
+  /** @type {string | null} */
+  var publicModalCartelaId = null;
+  /** @type {number | null} */
+  var publicModalNumero = null;
 
   var el = {
     screenSetup: document.getElementById("screen-setup"),
@@ -72,6 +84,49 @@
     sorteioNumero: document.getElementById("sorteio-numero"),
     sorteioNome: document.getElementById("sorteio-nome"),
     btnFecharSorteio: document.getElementById("btn-fechar-sorteio"),
+    screenChoose: document.getElementById("screen-choose"),
+    screenLogin: document.getElementById("screen-login"),
+    screenPublic: document.getElementById("screen-public"),
+    btnChooseAdmin: document.getElementById("btn-choose-admin"),
+    btnChoosePublic: document.getElementById("btn-choose-public"),
+    btnLoginVoltar: document.getElementById("btn-login-voltar"),
+    formLogin: document.getElementById("form-login"),
+    wrapLoginNova: document.getElementById("wrap-login-nova"),
+    wrapLoginNova2: document.getElementById("wrap-login-nova2"),
+    wrapLoginSenha: document.getElementById("wrap-login-senha"),
+    inputLoginNova: document.getElementById("input-login-nova"),
+    inputLoginNova2: document.getElementById("input-login-nova2"),
+    inputLoginSenha: document.getElementById("input-login-senha"),
+    labelLoginSenha: document.getElementById("label-login-senha"),
+    loginLede: document.getElementById("login-lede"),
+    loginMsg: document.getElementById("login-msg"),
+    btnPublicVoltar: document.getElementById("btn-public-voltar"),
+    selectPublicCartela: document.getElementById("select-public-cartela"),
+    publicGridWrap: document.getElementById("public-grid-wrap"),
+    publicCartelaMeta: document.getElementById("public-cartela-meta"),
+    publicNumberGrid: document.getElementById("public-number-grid"),
+    btnAdminIrPublico: document.getElementById("btn-admin-ir-publico"),
+    btnAdminSairSetup: document.getElementById("btn-admin-sair-setup"),
+    btnAdminIrPublicoToolbar: document.getElementById("btn-admin-ir-publico-toolbar"),
+    btnAdminSairCartela: document.getElementById("btn-admin-sair-cartela"),
+    inputSettingsPixChave: document.getElementById("input-settings-pix-chave"),
+    inputSettingsPixNome: document.getElementById("input-settings-pix-nome"),
+    inputSettingsPixCidade: document.getElementById("input-settings-pix-cidade"),
+    btnSettingsSalvarPix: document.getElementById("btn-settings-salvar-pix"),
+    settingsPixMsg: document.getElementById("settings-pix-msg"),
+    modalPublicReserva: document.getElementById("modal-public-reserva"),
+    modalPublicNumero: document.getElementById("modal-public-numero"),
+    modalPublicStepForm: document.getElementById("modal-public-step-form"),
+    modalPublicStepPix: document.getElementById("modal-public-step-pix"),
+    formPublicReserva: document.getElementById("form-public-reserva"),
+    inputPublicNome: document.getElementById("input-public-nome"),
+    modalPublicValorLine: document.getElementById("modal-public-valor-line"),
+    modalPublicPixValor: document.getElementById("modal-public-pix-valor"),
+    publicPixQr: document.getElementById("public-pix-qr"),
+    textareaPublicPix: document.getElementById("textarea-public-pix"),
+    btnPublicCancelar: document.getElementById("btn-public-cancelar"),
+    btnPublicCopiarPix: document.getElementById("btn-public-copiar-pix"),
+    btnPublicFecharPix: document.getElementById("btn-public-fechar-pix"),
   };
 
   /** @type {number | null} */
@@ -268,6 +323,17 @@
             typeof data.activeId === "string" || data.activeId === null
               ? data.activeId
               : null;
+          if (data.settings && typeof data.settings === "object") {
+            store.settings = {
+              adminPwHash:
+                data.settings.adminPwHash === null || typeof data.settings.adminPwHash === "string"
+                  ? data.settings.adminPwHash
+                  : null,
+              pixChave: typeof data.settings.pixChave === "string" ? data.settings.pixChave : "",
+              pixNome: typeof data.settings.pixNome === "string" ? data.settings.pixNome : "",
+              pixCidade: typeof data.settings.pixCidade === "string" ? data.settings.pixCidade : "",
+            };
+          }
         }
       }
     } catch (e) {
@@ -275,10 +341,411 @@
     }
     migrateFromV1();
     normalizeAllStore();
+    ensureSettings();
+  }
+
+  function ensureSettings() {
+    if (!store.settings || typeof store.settings !== "object") {
+      store.settings = {
+        adminPwHash: null,
+        pixChave: "",
+        pixNome: "",
+        pixCidade: "",
+      };
+      return;
+    }
+    if (store.settings.adminPwHash !== null && typeof store.settings.adminPwHash !== "string") {
+      store.settings.adminPwHash = null;
+    }
+    if (typeof store.settings.pixChave !== "string") store.settings.pixChave = "";
+    if (typeof store.settings.pixNome !== "string") store.settings.pixNome = "";
+    if (typeof store.settings.pixCidade !== "string") store.settings.pixCidade = "";
+  }
+
+  function isAdminSession() {
+    try {
+      return sessionStorage.getItem(SESSION_ADMIN_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function setAdminSession() {
+    try {
+      sessionStorage.setItem(SESSION_ADMIN_KEY, "1");
+    } catch (e) {}
+  }
+
+  function clearAdminSession() {
+    try {
+      sessionStorage.removeItem(SESSION_ADMIN_KEY);
+    } catch (e) {}
+  }
+
+  function sha256Hex(plain) {
+    if (!window.crypto || !crypto.subtle) {
+      return Promise.reject(new Error("Crypto"));
+    }
+    var enc = new TextEncoder();
+    return crypto.subtle.digest("SHA-256", enc.encode(plain)).then(function (buf) {
+      var a = new Uint8Array(buf);
+      var hex = "";
+      for (var i = 0; i < a.length; i++) hex += a[i].toString(16).padStart(2, "0");
+      return hex;
+    });
+  }
+
+  function pixSanitize(str, maxLen) {
+    var s = String(str || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^A-Za-z0-9 ]/g, "")
+      .toUpperCase()
+      .trim();
+    return s.slice(0, maxLen);
+  }
+
+  function emvTag(id, value) {
+    var v = String(value);
+    if (v.length > 99) v = v.slice(0, 99);
+    var len = String(v.length);
+    if (len.length === 1) len = "0" + len;
+    return id + len + v;
+  }
+
+  function crc16CcittPix(payload) {
+    var crc = 0xffff;
+    for (var i = 0; i < payload.length; i++) {
+      crc ^= (payload.charCodeAt(i) & 0xff) << 8;
+      for (var j = 0; j < 8; j++) {
+        if (crc & 0x8000) crc = ((crc << 1) ^ 0x1021) & 0xffff;
+        else crc = (crc << 1) & 0xffff;
+      }
+    }
+    var hex = crc.toString(16).toUpperCase();
+    return ("0000" + hex).slice(-4);
+  }
+
+  /**
+   * @param {{ chave: string, nome: string, cidade: string, amount: number, txid?: string }} o
+   */
+  function buildPixCopiaECola(o) {
+    var chave = String(o.chave || "").trim();
+    if (!chave) return "";
+    var nome = pixSanitize(o.nome, 25) || "RECEBEDOR";
+    var cidade = pixSanitize(o.cidade, 15) || "BRASIL";
+    var amount = round2(typeof o.amount === "number" ? o.amount : 0);
+    var amountStr = amount > 0 ? amount.toFixed(2) : "";
+    var txRaw = String(o.txid != null ? o.txid : "***")
+      .replace(/\s/g, "")
+      .toUpperCase();
+    var txid = pixSanitize(txRaw.replace(/[^A-Z0-9]/g, ""), 25) || "***";
+    var gui = emvTag("00", "BR.GOV.BCB.PIX");
+    var keyField = emvTag("01", chave);
+    var merchantAccount = emvTag("26", gui + keyField);
+    var payload =
+      emvTag("00", "01") + merchantAccount + emvTag("52", "0000") + emvTag("53", "986");
+    if (amountStr) payload += emvTag("54", amountStr);
+    payload += emvTag("58", "BR") + emvTag("59", nome) + emvTag("60", cidade);
+    payload += emvTag("62", emvTag("05", txid));
+    payload += "6304";
+    return payload + crc16CcittPix(payload);
+  }
+
+  function hideAllMainScreens() {
+    if (el.screenChoose) el.screenChoose.classList.add("hidden");
+    if (el.screenLogin) el.screenLogin.classList.add("hidden");
+    if (el.screenPublic) el.screenPublic.classList.add("hidden");
+    if (el.screenSetup) el.screenSetup.classList.add("hidden");
+    if (el.screenCartela) el.screenCartela.classList.add("hidden");
+  }
+
+  function showChooseMode() {
+    hideAllMainScreens();
+    if (el.screenChoose) el.screenChoose.classList.remove("hidden");
+  }
+
+  function updateLoginFormMode() {
+    ensureSettings();
+    var primeiro = !store.settings.adminPwHash;
+    if (el.wrapLoginNova) el.wrapLoginNova.classList.toggle("hidden", !primeiro);
+    if (el.wrapLoginNova2) el.wrapLoginNova2.classList.toggle("hidden", !primeiro);
+    if (el.wrapLoginSenha) el.wrapLoginSenha.classList.toggle("hidden", primeiro);
+    if (el.loginLede) {
+      el.loginLede.textContent = primeiro
+        ? "Crie a senha do painel neste aparelho. Guarde-a com segurança; não há recuperação automática."
+        : "Digite a senha para acessar cartelas, vendas e relatórios.";
+    }
+    if (el.labelLoginSenha) el.labelLoginSenha.textContent = "Senha";
+    if (el.loginMsg) el.loginMsg.textContent = "";
+    if (el.inputLoginSenha) el.inputLoginSenha.required = !primeiro;
+    if (el.inputLoginNova) el.inputLoginNova.required = primeiro;
+    if (el.inputLoginNova2) el.inputLoginNova2.required = primeiro;
+  }
+
+  function showLoginScreen() {
+    hideAllMainScreens();
+    if (el.screenLogin) el.screenLogin.classList.remove("hidden");
+    updateLoginFormMode();
+    if (el.formLogin) el.formLogin.reset();
+    updateLoginFormMode();
+    var primeiro = !store.settings.adminPwHash;
+    if (primeiro && el.inputLoginNova) el.inputLoginNova.focus();
+    else if (el.inputLoginSenha) el.inputLoginSenha.focus();
+  }
+
+  function refreshAdminSettingsInputs() {
+    ensureSettings();
+    if (el.inputSettingsPixChave) el.inputSettingsPixChave.value = store.settings.pixChave || "";
+    if (el.inputSettingsPixNome) el.inputSettingsPixNome.value = store.settings.pixNome || "";
+    if (el.inputSettingsPixCidade) el.inputSettingsPixCidade.value = store.settings.pixCidade || "";
+    if (el.settingsPixMsg) el.settingsPixMsg.textContent = "";
+  }
+
+  function salvarSettingsPix() {
+    ensureSettings();
+    if (el.inputSettingsPixChave) store.settings.pixChave = el.inputSettingsPixChave.value.trim();
+    if (el.inputSettingsPixNome) store.settings.pixNome = el.inputSettingsPixNome.value.trim();
+    if (el.inputSettingsPixCidade) store.settings.pixCidade = el.inputSettingsPixCidade.value.trim();
+    saveStore();
+    if (el.settingsPixMsg) el.settingsPixMsg.textContent = "Dados PIX salvos.";
+  }
+
+  function enterAdminFromLogin() {
+    hideAllMainScreens();
+    if (el.screenSetup) el.screenSetup.classList.remove("hidden");
+    refreshAdminSettingsInputs();
+    showLista();
+  }
+
+  function exitAdminToChoose() {
+    if (loteSelectionMode) exitLoteSelectionDiscard();
+    clearAdminSession();
+    fecharModalPublica();
+    fecharModalVenda();
+    fecharModalVendaLote();
+    fecharSorteio();
+    showChooseMode();
+  }
+
+  function showPublicMode() {
+    hideAllMainScreens();
+    if (el.screenPublic) el.screenPublic.classList.remove("hidden");
+    fecharModalPublica();
+    refreshPublicCartelaSelect();
+  }
+
+  function refreshPublicCartelaSelect() {
+    if (!el.selectPublicCartela) return;
+    el.selectPublicCartela.innerHTML = "";
+    var n = store.cartelas.length;
+    if (n === 0) {
+      var o = document.createElement("option");
+      o.value = "";
+      o.textContent = "Nenhuma cartela disponível";
+      el.selectPublicCartela.appendChild(o);
+      if (el.publicGridWrap) el.publicGridWrap.classList.add("hidden");
+      return;
+    }
+    var o0 = document.createElement("option");
+    o0.value = "";
+    o0.textContent = "Selecione…";
+    el.selectPublicCartela.appendChild(o0);
+    for (var i = 0; i < n; i++) {
+      var c = store.cartelas[i];
+      normalizeCartela(c);
+      var opt = document.createElement("option");
+      opt.value = c.id;
+      var livres = c.total - countVendidos(c);
+      var tit = c.title && String(c.title).trim() ? c.title : "Sem título";
+      opt.textContent = tit + " (" + livres + " livres)";
+      el.selectPublicCartela.appendChild(opt);
+    }
+    el.selectPublicCartela.onchange = onPublicCartelaChange;
+    if (el.selectPublicCartela.value) onPublicCartelaChange();
+    else if (el.publicGridWrap) el.publicGridWrap.classList.add("hidden");
+  }
+
+  function onPublicCartelaChange() {
+    if (!el.selectPublicCartela || !el.publicGridWrap || !el.publicCartelaMeta) return;
+    var id = el.selectPublicCartela.value;
+    if (!id) {
+      el.publicGridWrap.classList.add("hidden");
+      return;
+    }
+    var c = getCartela(id);
+    if (!c) {
+      el.publicGridWrap.classList.add("hidden");
+      return;
+    }
+    normalizeCartela(c);
+    el.publicGridWrap.classList.remove("hidden");
+    var tit = c.title && String(c.title).trim() ? c.title : "Sem título";
+    var livres = c.total - countVendidos(c);
+    el.publicCartelaMeta.textContent =
+      tit +
+      " · " +
+      livres +
+      " número(s) disponível(is) · " +
+      c.total +
+      " no total" +
+      (c.precoPadrao > 0 ? " · " + formatMoney(c.precoPadrao) + " por número" : " · preço padrão não definido");
+    renderPublicGrid(c);
+  }
+
+  function renderPublicGrid(c) {
+    if (!el.publicNumberGrid) return;
+    el.publicNumberGrid.innerHTML = "";
+    var cols = Math.min(16, Math.max(8, Math.ceil(Math.sqrt(c.total))));
+    el.publicNumberGrid.style.gridTemplateColumns = "repeat(" + cols + ", minmax(48px, 1fr))";
+
+    for (var n = 1; n <= c.total; n++) {
+      var key = String(n);
+      var venda = c.vendas[key];
+      var cell = document.createElement("button");
+      cell.type = "button";
+      cell.className = "cell";
+      cell.setAttribute("role", "gridcell");
+      if (venda) {
+        cell.classList.add("cell-sold", "cell-public-taken");
+        cell.disabled = true;
+        cell.setAttribute("aria-label", "Número " + n + ", indisponível");
+      } else {
+        cell.setAttribute("aria-label", "Número " + n + ", disponível. Toque para reservar.");
+        cell.dataset.numero = key;
+        cell.dataset.cartelaId = c.id;
+        cell.addEventListener("click", onPublicCellClick);
+      }
+      var span = document.createElement("span");
+      span.className = "cell-num";
+      span.textContent = String(n);
+      cell.appendChild(span);
+      el.publicNumberGrid.appendChild(cell);
+    }
+  }
+
+  function onPublicCellClick(ev) {
+    var btn = ev.currentTarget;
+    var id = btn.dataset.cartelaId;
+    var num = parseInt(btn.dataset.numero, 10);
+    if (!id || isNaN(num)) return;
+    var c = getCartela(id);
+    if (!c || c.vendas[String(num)]) return;
+    if (c.precoPadrao <= 0) {
+      alert(
+        "Esta cartela ainda não tem preço por número definido. Peça ao organizador para configurar o preço padrão no painel."
+      );
+      return;
+    }
+    publicModalCartelaId = id;
+    publicModalNumero = num;
+    if (el.modalPublicNumero) el.modalPublicNumero.textContent = String(num);
+    if (el.modalPublicValorLine) {
+      el.modalPublicValorLine.textContent = "Valor: " + formatMoney(c.precoPadrao);
+    }
+    if (el.inputPublicNome) el.inputPublicNome.value = "";
+    if (el.modalPublicStepForm) el.modalPublicStepForm.classList.remove("hidden");
+    if (el.modalPublicStepPix) el.modalPublicStepPix.classList.add("hidden");
+    if (el.modalPublicReserva) el.modalPublicReserva.classList.remove("hidden");
+    if (el.modalOverlay) el.modalOverlay.classList.remove("hidden");
+    if (el.inputPublicNome) el.inputPublicNome.focus();
+  }
+
+  function fecharModalPublica() {
+    publicModalCartelaId = null;
+    publicModalNumero = null;
+    if (el.modalPublicReserva) el.modalPublicReserva.classList.add("hidden");
+    if (el.modalOverlay && el.modalVenda.classList.contains("hidden") && el.modalSorteio.classList.contains("hidden")) {
+      if (!el.modalVendaLote || el.modalVendaLote.classList.contains("hidden")) {
+        el.modalOverlay.classList.add("hidden");
+      }
+    }
+    if (el.publicPixQr) el.publicPixQr.innerHTML = "";
+    if (el.textareaPublicPix) el.textareaPublicPix.value = "";
+  }
+
+  function abrirPassoPixPublico(c, nome, valor) {
+    ensureSettings();
+    if (el.modalPublicStepForm) el.modalPublicStepForm.classList.add("hidden");
+    if (el.modalPublicStepPix) el.modalPublicStepPix.classList.remove("hidden");
+    if (el.modalPublicPixValor) el.modalPublicPixValor.textContent = "Valor: " + formatMoney(valor);
+
+    var txid = "S" + String(publicModalNumero) + "T" + Date.now().toString(36).toUpperCase().slice(-12);
+    var payload = buildPixCopiaECola({
+      chave: store.settings.pixChave,
+      nome: store.settings.pixNome,
+      cidade: store.settings.pixCidade,
+      amount: valor,
+      txid: txid,
+    });
+
+    if (el.textareaPublicPix) el.textareaPublicPix.value = payload || "";
+
+    if (el.publicPixQr) {
+      el.publicPixQr.innerHTML = "";
+      if (payload && typeof QRCode !== "undefined") {
+        try {
+          new QRCode(el.publicPixQr, { text: payload, width: 200, height: 200 });
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+    }
+
+    if (!payload) {
+      if (el.textareaPublicPix) {
+        el.textareaPublicPix.value =
+          "PIX não configurado pelo organizador. Pague " +
+          formatMoney(valor) +
+          " usando a chave combinada com o organizador. Nome na reserva: " +
+          nome;
+      }
+    }
+  }
+
+  function onSubmitPublicReserva(ev) {
+    ev.preventDefault();
+    if (publicModalCartelaId == null || publicModalNumero == null) return;
+    var c = getCartela(publicModalCartelaId);
+    if (!c) return;
+    var key = String(publicModalNumero);
+    if (c.vendas[key]) {
+      alert("Este número acabou de ser reservado por outra pessoa. Escolha outro.");
+      fecharModalPublica();
+      refreshPublicCartelaSelect();
+      return;
+    }
+    var nome = el.inputPublicNome ? el.inputPublicNome.value.trim() : "";
+    if (!nome) {
+      if (el.inputPublicNome) el.inputPublicNome.focus();
+      return;
+    }
+    if (c.precoPadrao <= 0) {
+      alert("Preço não configurado.");
+      return;
+    }
+    var valor = round2(c.precoPadrao);
+    c.vendas[key] = { nome: nome, pago: false, valor: valor };
+    saveStore();
+    renderListaCartelas();
+    abrirPassoPixPublico(c, nome, valor);
+    var idCartela = publicModalCartelaId;
+    if (el.selectPublicCartela && el.selectPublicCartela.value === idCartela) {
+      onPublicCartelaChange();
+    }
   }
 
   function countVendidos(c) {
     return Object.keys(c.vendas).length;
+  }
+
+  function countPagos(c) {
+    var n = 0;
+    for (var k in c.vendas) {
+      if (!Object.prototype.hasOwnProperty.call(c.vendas, k)) continue;
+      if (c.vendas[k].pago) n++;
+    }
+    return n;
   }
 
   function totaisCartela(c) {
@@ -400,12 +867,20 @@
   }
 
   function showLista() {
+    if (!isAdminSession()) {
+      showLoginScreen();
+      return;
+    }
     if (loteSelectionMode) {
       exitLoteSelectionDiscard();
     }
+    if (el.screenChoose) el.screenChoose.classList.add("hidden");
+    if (el.screenLogin) el.screenLogin.classList.add("hidden");
+    if (el.screenPublic) el.screenPublic.classList.add("hidden");
     el.screenSetup.classList.remove("hidden");
     el.screenCartela.classList.add("hidden");
     renderListaCartelas();
+    refreshAdminSettingsInputs();
   }
 
   function showSelectionBar() {
@@ -547,6 +1022,9 @@
   }
 
   function showScreenCartela() {
+    if (el.screenChoose) el.screenChoose.classList.add("hidden");
+    if (el.screenLogin) el.screenLogin.classList.add("hidden");
+    if (el.screenPublic) el.screenPublic.classList.add("hidden");
     el.screenSetup.classList.add("hidden");
     el.screenCartela.classList.remove("hidden");
   }
@@ -666,6 +1144,10 @@
   }
 
   function openCartelaView() {
+    if (!isAdminSession()) {
+      showLoginScreen();
+      return;
+    }
     var c = getActiveCartela();
     if (!c) {
       showLista();
@@ -747,12 +1229,15 @@
 
     el.cartelaTitle.value = c.title || "";
     var v = countVendidos(c);
+    var pagos = countPagos(c);
     el.progressText.textContent = v + " / " + c.total + " vendidos";
-    var podeSortear = v > 0;
+    var podeSortear = pagos > 0;
     el.btnSortear.disabled = !podeSortear;
     el.btnSortear.title = podeSortear
-      ? "Sorteia aleatoriamente entre os " + v + " número(s) já vendido(s)"
-      : "Venda pelo menos um número para poder sortear";
+      ? "Sorteia aleatoriamente entre os " + pagos + " número(s) com pagamento confirmado"
+      : v > 0
+        ? "Marque como pago ao menos um número vendido para poder sortear"
+        : "Venda pelo menos um número e confirme o pagamento para poder sortear";
     if (el.btnRelatorioPdf) {
       el.btnRelatorioPdf.disabled = v === 0;
     }
@@ -867,30 +1352,48 @@
       abrirRelatorioImpressao();
       return;
     }
-    var el = document.createElement("div");
-    el.style.cssText =
-      "position:fixed;left:0;top:0;width:210mm;padding:12mm;opacity:0.02;pointer-events:none;z-index:-9999;font-family:system-ui,sans-serif;color:#111;font-size:11pt;";
-    el.innerHTML = "<style>" + RELATORIO_CSS + "</style>" + buildRelatorioBodyHtml(c);
-    document.body.appendChild(el);
+    // Conteúdo em left:-10000px não é pintado em vários navegadores → html2canvas/PDF em branco.
+    // Overlay branco cobre a tela só durante a captura (pointer-events:none).
+    var outer = document.createElement("div");
+    outer.setAttribute("aria-hidden", "true");
+    outer.style.cssText =
+      "position:fixed;inset:0;z-index:2147483646;overflow:auto;background:#fff;pointer-events:none;";
+    var inner = document.createElement("div");
+    inner.style.cssText =
+      "width:210mm;max-width:100%;margin:0 auto;padding:12mm;box-sizing:border-box;background:#fff;color:#111;font-family:system-ui,sans-serif;font-size:11pt;";
+    inner.innerHTML = "<style>" + RELATORIO_CSS + "</style>" + buildRelatorioBodyHtml(c);
+    outer.appendChild(inner);
+    document.body.appendChild(outer);
     var fn = sanitizeFilename(c.title && String(c.title).trim() ? c.title : "relatorio") + "-vendas.pdf";
     var opt = {
       margin: [10, 10, 10, 10],
       filename: fn,
       image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, logging: false },
+      html2canvas: {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff",
+      },
       jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
     };
-    html2pdf()
-      .set(opt)
-      .from(el)
-      .save()
-      .then(function () {
-        if (el.parentNode) document.body.removeChild(el);
-      })
-      .catch(function () {
-        if (el.parentNode) document.body.removeChild(el);
-        abrirRelatorioImpressao();
-      });
+    function removeOverlay() {
+      if (outer.parentNode) document.body.removeChild(outer);
+    }
+    function runPdf() {
+      html2pdf()
+        .set(opt)
+        .from(inner)
+        .save()
+        .then(removeOverlay)
+        .catch(function () {
+          removeOverlay();
+          abrirRelatorioImpressao();
+        });
+    }
+    requestAnimationFrame(function () {
+      requestAnimationFrame(runPdf);
+    });
   }
 
   function gerarRelatorioPDF() {
@@ -1045,15 +1548,22 @@
     var c = getActiveCartela();
     if (!c) return;
 
-    var keys = Object.keys(c.vendas);
-    if (keys.length === 0) return;
+    var keys = Object.keys(c.vendas).filter(function (k) {
+      return c.vendas[k].pago;
+    });
+    if (keys.length === 0) {
+      alert(
+        "Não há números com pagamento confirmado. Marque \"pago\" nas vendas antes de sortear."
+      );
+      return;
+    }
 
     el.modalSorteio.classList.remove("hidden");
     el.modalOverlay.classList.remove("hidden");
     el.sorteioResult.classList.add("hidden");
     el.sorteioHint.classList.remove("hidden");
     el.btnFecharSorteio.classList.add("hidden");
-    el.sorteioHint.textContent = "Embaralhando entre os números vendidos…";
+    el.sorteioHint.textContent = "Embaralhando entre os números já pagos…";
 
     var candidatos = keys.map(function (k) {
       return parseInt(k, 10);
@@ -1428,6 +1938,10 @@
 
   el.modalOverlay.addEventListener("click", function () {
     if (!el.modalSorteio.classList.contains("hidden")) return;
+    if (el.modalPublicReserva && !el.modalPublicReserva.classList.contains("hidden")) {
+      fecharModalPublica();
+      return;
+    }
     if (el.modalVendaLote && !el.modalVendaLote.classList.contains("hidden")) {
       fecharModalVendaLote();
       return;
@@ -1439,6 +1953,8 @@
     if (ev.key === "Escape") {
       if (!el.modalSorteio.classList.contains("hidden")) {
         fecharSorteio();
+      } else if (el.modalPublicReserva && !el.modalPublicReserva.classList.contains("hidden")) {
+        fecharModalPublica();
       } else if (loteSelectionMode) {
         cancelLoteSelection();
       } else if (el.modalVendaLote && !el.modalVendaLote.classList.contains("hidden")) {
@@ -1449,13 +1965,151 @@
     }
   });
 
+  if (el.btnChooseAdmin) {
+    el.btnChooseAdmin.addEventListener("click", function () {
+      showLoginScreen();
+    });
+  }
+  if (el.btnChoosePublic) {
+    el.btnChoosePublic.addEventListener("click", function () {
+      showPublicMode();
+    });
+  }
+  if (el.btnLoginVoltar) {
+    el.btnLoginVoltar.addEventListener("click", function () {
+      showChooseMode();
+    });
+  }
+  if (el.formLogin) {
+    el.formLogin.addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      ensureSettings();
+      if (el.loginMsg) el.loginMsg.textContent = "";
+      var primeiro = !store.settings.adminPwHash;
+
+      function fail(msg) {
+        if (el.loginMsg) el.loginMsg.textContent = msg;
+      }
+
+      if (primeiro) {
+        var n1 = el.inputLoginNova ? el.inputLoginNova.value : "";
+        var n2 = el.inputLoginNova2 ? el.inputLoginNova2.value : "";
+        if (n1.length < 4) {
+          fail("Use uma senha com pelo menos 4 caracteres.");
+          return;
+        }
+        if (n1 !== n2) {
+          fail("As senhas não coincidem.");
+          return;
+        }
+        sha256Hex(n1)
+          .then(function (hash) {
+            store.settings.adminPwHash = hash;
+            saveStore();
+            setAdminSession();
+            enterAdminFromLogin();
+          })
+          .catch(function () {
+            fail("Não foi possível criar a senha neste navegador.");
+          });
+        return;
+      }
+
+      var senha = el.inputLoginSenha ? el.inputLoginSenha.value : "";
+      if (!senha) {
+        fail("Digite a senha.");
+        return;
+      }
+      sha256Hex(senha)
+        .then(function (hash) {
+          if (hash === store.settings.adminPwHash) {
+            setAdminSession();
+            enterAdminFromLogin();
+          } else {
+            fail("Senha incorreta.");
+          }
+        })
+        .catch(function () {
+          fail("Login indisponível neste navegador.");
+        });
+    });
+  }
+  if (el.btnPublicVoltar) {
+    el.btnPublicVoltar.addEventListener("click", function () {
+      showChooseMode();
+    });
+  }
+  if (el.btnAdminSairSetup) {
+    el.btnAdminSairSetup.addEventListener("click", function () {
+      exitAdminToChoose();
+    });
+  }
+  if (el.btnAdminSairCartela) {
+    el.btnAdminSairCartela.addEventListener("click", function () {
+      exitAdminToChoose();
+    });
+  }
+  if (el.btnAdminIrPublico) {
+    el.btnAdminIrPublico.addEventListener("click", function () {
+      showPublicMode();
+    });
+  }
+  if (el.btnAdminIrPublicoToolbar) {
+    el.btnAdminIrPublicoToolbar.addEventListener("click", function () {
+      showPublicMode();
+    });
+  }
+  if (el.btnSettingsSalvarPix) {
+    el.btnSettingsSalvarPix.addEventListener("click", function () {
+      salvarSettingsPix();
+    });
+  }
+  if (el.formPublicReserva) {
+    el.formPublicReserva.addEventListener("submit", onSubmitPublicReserva);
+  }
+  if (el.btnPublicCancelar) {
+    el.btnPublicCancelar.addEventListener("click", function () {
+      fecharModalPublica();
+    });
+  }
+  if (el.btnPublicFecharPix) {
+    el.btnPublicFecharPix.addEventListener("click", function () {
+      fecharModalPublica();
+    });
+  }
+  if (el.btnPublicCopiarPix) {
+    el.btnPublicCopiarPix.addEventListener("click", function () {
+      if (!el.textareaPublicPix) return;
+      el.textareaPublicPix.select();
+      try {
+        document.execCommand("copy");
+        if (el.btnPublicCopiarPix) el.btnPublicCopiarPix.textContent = "Copiado!";
+        setTimeout(function () {
+          if (el.btnPublicCopiarPix) el.btnPublicCopiarPix.textContent = "Copiar código PIX";
+        }, 2000);
+      } catch (e) {
+        alert("Copie manualmente o texto do campo.");
+      }
+    });
+  }
+
   loadStore();
   renderSetupPromocoesLista();
 
-  if (store.activeId && getCartela(store.activeId)) {
-    openCartelaView();
-    renderListaCartelas();
+  var hash = (location.hash || "").replace(/^#/, "").toLowerCase();
+  if (hash === "comprar" || hash === "public") {
+    showPublicMode();
+  } else if (isAdminSession()) {
+    refreshAdminSettingsInputs();
+    if (store.activeId && getCartela(store.activeId)) {
+      openCartelaView();
+      renderListaCartelas();
+    } else {
+      enterAdminFromLogin();
+    }
+  } else if (hash === "admin") {
+    showLoginScreen();
   } else {
-    showLista();
+    showChooseMode();
   }
 })();

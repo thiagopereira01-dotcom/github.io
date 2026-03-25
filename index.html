@@ -15,18 +15,129 @@
       src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"
       crossorigin="anonymous"
     ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+      crossorigin="anonymous"
+    ></script>
   </head>
   <body>
     <div id="app">
+      <!-- Escolha: admin ou compra pública -->
+      <section id="screen-choose" class="screen screen-choose" aria-labelledby="choose-title">
+        <div class="panel choose-panel">
+          <h1 id="choose-title" class="logo choose-logo">Cartela de sorteio</h1>
+          <p class="lede choose-lede">
+            Escolha como deseja acessar: o painel do organizador é protegido por senha. Quem vai comprar pode
+            reservar um número e gerar o PIX sem cadastro.
+          </p>
+          <div class="choose-actions">
+            <button type="button" id="btn-choose-admin" class="btn btn-primary choose-card-btn">
+              <span class="choose-card-title">Administrador</span>
+              <span class="choose-card-desc">Cartelas, vendas, relatórios e valores</span>
+            </button>
+            <button type="button" id="btn-choose-public" class="btn btn-accent choose-card-btn">
+              <span class="choose-card-title">Comprar número</span>
+              <span class="choose-card-desc">Escolher número e PIX para pagamento</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Login administrador -->
+      <section id="screen-login" class="screen hidden" aria-labelledby="login-title">
+        <div class="panel setup-panel setup-wide">
+          <button type="button" id="btn-login-voltar" class="btn btn-ghost btn-back">← Início</button>
+          <h1 id="login-title" class="logo">Acesso administrador</h1>
+          <p id="login-lede" class="lede">
+            Digite a senha do painel. Na primeira vez, você criará essa senha neste aparelho.
+          </p>
+          <form id="form-login" class="form-setup">
+            <label class="field hidden" id="wrap-login-nova">
+              <span class="field-label">Nova senha</span>
+              <input type="password" id="input-login-nova" autocomplete="new-password" />
+            </label>
+            <label class="field hidden" id="wrap-login-nova2">
+              <span class="field-label">Repita a nova senha</span>
+              <input type="password" id="input-login-nova2" autocomplete="new-password" />
+            </label>
+            <label class="field" id="wrap-login-senha">
+              <span class="field-label" id="label-login-senha">Senha</span>
+              <input type="password" id="input-login-senha" required autocomplete="current-password" />
+            </label>
+            <p id="login-msg" class="field-hint login-msg" role="status"></p>
+            <button type="submit" class="btn btn-primary" id="btn-login-submit">Entrar</button>
+          </form>
+        </div>
+      </section>
+
+      <!-- Compra pública (sem login) -->
+      <section id="screen-public" class="screen hidden" aria-labelledby="public-title">
+        <header class="public-header">
+          <button type="button" id="btn-public-voltar" class="btn btn-ghost btn-back">← Início</button>
+        </header>
+        <div class="panel setup-panel setup-wide public-inner">
+          <h1 id="public-title" class="logo">Reservar número</h1>
+          <p class="lede">
+            Escolha a cartela, depois um número livre. Você informa seu nome e geramos o código PIX com o valor
+            do número (o organizador confirma o pagamento no painel).
+          </p>
+          <div id="public-pick-cartela" class="public-pick-block">
+            <label class="field">
+              <span class="field-label">Cartela</span>
+              <select id="select-public-cartela" aria-label="Cartela para compra"></select>
+            </label>
+          </div>
+          <div id="public-grid-wrap" class="grid-wrap public-grid-wrap hidden">
+            <p id="public-cartela-meta" class="public-meta"></p>
+            <div class="legend public-legend">
+              <span class="legend-item"><span class="swatch swatch-free"></span> Disponível</span>
+              <span class="legend-item"><span class="swatch swatch-sold-anon"></span> Indisponível</span>
+            </div>
+            <div id="public-number-grid" class="number-grid" role="grid" aria-label="Números disponíveis"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- Lista + criar cartela -->
-      <section id="screen-setup" class="screen" aria-labelledby="setup-title">
+      <section id="screen-setup" class="screen hidden" aria-labelledby="setup-title">
+        <header class="admin-shell-header">
+          <span class="admin-shell-label">Administração</span>
+          <div class="admin-shell-actions">
+            <button type="button" id="btn-admin-ir-publico" class="btn btn-ghost btn-sm">Compra pública</button>
+            <button type="button" id="btn-admin-sair-setup" class="btn btn-ghost btn-sm">Sair</button>
+          </div>
+        </header>
         <div class="panel setup-panel setup-wide">
           <h1 id="setup-title" class="logo">Cartela de sorteio</h1>
           <p class="lede">
             Crie quantas cartelas precisar e acesse todas aqui. Em cada uma, registre as
-            vendas; use <strong>Sortear</strong> quando quiser — entre os números já vendidos
-            será sorteado um ganhador e o nome só aparece nessa hora.
+            vendas; use <strong>Sortear</strong> quando quiser — entre os números
+            <strong>com pagamento confirmado</strong> será sorteado um ganhador e o nome só aparece nessa hora.
           </p>
+
+          <details class="admin-settings-details">
+            <summary class="admin-settings-summary">Senha, PIX e aviso de segurança</summary>
+            <div class="admin-settings-body">
+              <p class="field-hint">
+                A senha e os dados ficam só neste navegador (site estático). Quem souber a senha ou usar o mesmo
+                computador acessa o painel. Para compras públicas, configure a chave PIX abaixo.
+              </p>
+              <label class="field">
+                <span class="field-label">Chave PIX (CPF, e-mail, telefone ou aleatória)</span>
+                <input type="text" id="input-settings-pix-chave" maxlength="77" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span class="field-label">Nome do recebedor (como no banco, até 25 caracteres)</span>
+                <input type="text" id="input-settings-pix-nome" maxlength="25" autocomplete="name" />
+              </label>
+              <label class="field">
+                <span class="field-label">Cidade (até 15 caracteres)</span>
+                <input type="text" id="input-settings-pix-cidade" maxlength="15" autocomplete="address-level2" />
+              </label>
+              <button type="button" id="btn-settings-salvar-pix" class="btn btn-primary btn-sm">Salvar dados PIX</button>
+              <p id="settings-pix-msg" class="field-hint" role="status"></p>
+            </div>
+          </details>
 
           <div class="cartelas-block">
             <h2 class="subsection-title">Suas cartelas</h2>
@@ -135,13 +246,17 @@
             />
           </div>
           <div class="toolbar-actions">
+            <button type="button" id="btn-admin-ir-publico-toolbar" class="btn btn-ghost btn-sm" title="Abrir tela de compra pública">
+              Compra pública
+            </button>
+            <button type="button" id="btn-admin-sair-cartela" class="btn btn-ghost btn-sm">Sair</button>
             <span id="progress-text" class="progress-text"></span>
             <button
               type="button"
               id="btn-sortear"
               class="btn btn-accent"
               disabled
-              title="Sorteia entre os números já vendidos nesta cartela"
+              title="Sorteia apenas entre números com pagamento confirmado"
             >
               Sortear
             </button>
@@ -385,7 +500,7 @@
     >
       <h2 id="modal-sorteio-title" class="modal-title">Sorteio</h2>
       <div id="sorteio-stage" class="sorteio-stage">
-        <p id="sorteio-hint" class="sorteio-hint">Embaralhando números…</p>
+        <p id="sorteio-hint" class="sorteio-hint">Embaralhando entre os pagos…</p>
         <div id="sorteio-result" class="sorteio-result hidden">
           <p class="sorteio-label">Número sorteado</p>
           <p id="sorteio-numero" class="sorteio-numero"></p>
@@ -395,6 +510,54 @@
       </div>
       <div class="modal-actions sorteio-actions">
         <button type="button" id="btn-fechar-sorteio" class="btn btn-primary hidden">Fechar</button>
+      </div>
+    </div>
+
+    <!-- Modal reserva pública + PIX -->
+    <div
+      id="modal-public-reserva"
+      class="modal modal-public hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-public-title"
+    >
+      <h2 id="modal-public-title" class="modal-title">Número <span id="modal-public-numero"></span></h2>
+      <div id="modal-public-step-form">
+        <p id="modal-public-valor-line" class="public-valor-line"></p>
+        <form id="form-public-reserva" class="form-venda">
+          <label class="field">
+            <span class="field-label">Seu nome</span>
+            <input
+              type="text"
+              id="input-public-nome"
+              name="nome"
+              maxlength="80"
+              placeholder="Nome completo"
+              autocomplete="name"
+              required
+            />
+          </label>
+          <p class="field-hint">
+            O número fica reservado como <strong>não pago</strong> até o organizador confirmar no painel.
+          </p>
+          <div class="modal-actions">
+            <button type="button" id="btn-public-cancelar" class="btn btn-ghost">Cancelar</button>
+            <button type="submit" class="btn btn-primary">Reservar e ver PIX</button>
+          </div>
+        </form>
+      </div>
+      <div id="modal-public-step-pix" class="hidden">
+        <p class="public-pix-lede">Pague com PIX no valor abaixo. Depois avise o organizador se necessário.</p>
+        <p id="modal-public-pix-valor" class="public-valor-line"></p>
+        <div id="public-pix-qr" class="public-pix-qr"></div>
+        <label class="field">
+          <span class="field-label">Copia e cola</span>
+          <textarea id="textarea-public-pix" class="public-pix-textarea" readonly rows="4"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="btn-public-copiar-pix" class="btn btn-primary">Copiar código PIX</button>
+          <button type="button" id="btn-public-fechar-pix" class="btn btn-ghost">Fechar</button>
+        </div>
       </div>
     </div>
 
