@@ -1,0 +1,17 @@
+{
+  "name": "cartela-picpay-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Proxy seguro para API PIX PicPay (OAuth + charge/pix). Não exponha PICPAY_CLIENT_SECRET no site estático.",
+  "main": "picpay-proxy.js",
+  "scripts": {
+    "start": "node picpay-proxy.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}

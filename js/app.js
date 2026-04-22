@@ -5,7 +5,7 @@
   var STORAGE_V2 = "sorteio-cartela-v2";
   var SESSION_ADMIN_KEY = "sorteio-admin-session";
 
-  /** @type {{ cartelas: Array<{ id: string, title: string, total: number, precoPadrao: number, promocoes: Array<{ id: string, qtd: number, valorTotal: number }>, vendas: Record<string, { nome: string, pago: boolean, valor: number }>, createdAt: number }>, activeId: string | null, settings: { adminPwHash: string | null, pixChave: string, pixNome: string, pixCidade: string } }} */
+  /** @type {{ cartelas: Array<{ id: string, title: string, total: number, precoPadrao: number, promocoes: Array<{ id: string, qtd: number, valorTotal: number }>, vendas: Record<string, { nome: string, pago: boolean, valor: number }>, createdAt: number }>, activeId: string | null, settings: { adminPwHash: string | null, pixChave: string, pixNome: string, pixCidade: string, pixPaymentMode: string, picpayProxyBaseUrl: string } }} */
   var store = {
     cartelas: [],
     activeId: null,
@@ -14,6 +14,8 @@
       pixChave: "",
       pixNome: "",
       pixCidade: "",
+      pixPaymentMode: "manual",
+      picpayProxyBaseUrl: "",
     },
   };
 
@@ -127,6 +129,14 @@
     btnPublicCancelar: document.getElementById("btn-public-cancelar"),
     btnPublicCopiarPix: document.getElementById("btn-public-copiar-pix"),
     btnPublicFecharPix: document.getElementById("btn-public-fechar-pix"),
+    selectSettingsPixMode: document.getElementById("select-settings-pix-mode"),
+    wrapSettingsPicpayProxy: document.getElementById("wrap-settings-picpay-proxy"),
+    inputSettingsPicpayProxy: document.getElementById("input-settings-picpay-proxy"),
+    wrapPublicPicpayFields: document.getElementById("wrap-public-picpay-fields"),
+    inputPublicEmail: document.getElementById("input-public-email"),
+    inputPublicCpf: document.getElementById("input-public-cpf"),
+    inputPublicCelular: document.getElementById("input-public-celular"),
+    publicPixLoading: document.getElementById("public-pix-loading"),
   };
 
   /** @type {number | null} */
@@ -332,6 +342,10 @@
               pixChave: typeof data.settings.pixChave === "string" ? data.settings.pixChave : "",
               pixNome: typeof data.settings.pixNome === "string" ? data.settings.pixNome : "",
               pixCidade: typeof data.settings.pixCidade === "string" ? data.settings.pixCidade : "",
+              pixPaymentMode:
+                typeof data.settings.pixPaymentMode === "string" ? data.settings.pixPaymentMode : "manual",
+              picpayProxyBaseUrl:
+                typeof data.settings.picpayProxyBaseUrl === "string" ? data.settings.picpayProxyBaseUrl : "",
             };
           }
         }
@@ -351,6 +365,8 @@
         pixChave: "",
         pixNome: "",
         pixCidade: "",
+        pixPaymentMode: "manual",
+        picpayProxyBaseUrl: "",
       };
       return;
     }
@@ -360,6 +376,82 @@
     if (typeof store.settings.pixChave !== "string") store.settings.pixChave = "";
     if (typeof store.settings.pixNome !== "string") store.settings.pixNome = "";
     if (typeof store.settings.pixCidade !== "string") store.settings.pixCidade = "";
+    if (store.settings.pixPaymentMode !== "picpay" && store.settings.pixPaymentMode !== "manual") {
+      store.settings.pixPaymentMode = "manual";
+    }
+    if (typeof store.settings.picpayProxyBaseUrl !== "string") store.settings.picpayProxyBaseUrl = "";
+  }
+
+  function isPicPayMode() {
+    ensureSettings();
+    return (
+      store.settings.pixPaymentMode === "picpay" &&
+      String(store.settings.picpayProxyBaseUrl || "").trim().length > 0
+    );
+  }
+
+  function togglePicpaySettingsWrap() {
+    if (!el.wrapSettingsPicpayProxy) return;
+    var picpay = el.selectSettingsPixMode && el.selectSettingsPixMode.value === "picpay";
+    el.wrapSettingsPicpayProxy.classList.toggle("hidden", !picpay);
+  }
+
+  function updatePublicFormPicpayVisibility() {
+    if (!el.wrapPublicPicpayFields) return;
+    var on = isPicPayMode();
+    el.wrapPublicPicpayFields.classList.toggle("hidden", !on);
+    if (!on) {
+      if (el.inputPublicEmail) el.inputPublicEmail.value = "";
+      if (el.inputPublicCpf) el.inputPublicCpf.value = "";
+      if (el.inputPublicCelular) el.inputPublicCelular.value = "";
+    }
+  }
+
+  function setPublicPixLoading(on) {
+    if (el.publicPixLoading) el.publicPixLoading.classList.toggle("hidden", !on);
+    if (el.btnPublicCopiarPix) el.btnPublicCopiarPix.disabled = !!on;
+  }
+
+  function buildPicPayMerchantChargeId() {
+    var id = "n" + String(publicModalNumero != null ? publicModalNumero : "0") + "-" + Date.now();
+    id = id.replace(/[^a-zA-Z0-9-]/g, "");
+    if (id.length < 6) id = (id + "xxxxxx").slice(0, 6);
+    if (id.length > 36) id = id.slice(0, 36);
+    return id;
+  }
+
+  function parseBrMobileForPicPay(celularRaw) {
+    var d = String(celularRaw || "").replace(/\D/g, "");
+    if (d.length >= 13 && d.slice(0, 2) === "55") d = d.slice(2);
+    if (d.length === 11 && /^[1-9][0-9]9[0-9]{8}$/.test(d)) {
+      return {
+        countryCode: "55",
+        areaCode: d.slice(0, 2),
+        number: d.slice(2),
+        type: "MOBILE",
+      };
+    }
+    if (d.length === 10 && /^[1-9][0-9]/.test(d)) {
+      return {
+        countryCode: "55",
+        areaCode: d.slice(0, 2),
+        number: d.slice(2),
+        type: "RESIDENTIAL",
+      };
+    }
+    return null;
+  }
+
+  function extractPixQrFromPicPayResponse(j) {
+    if (!j || typeof j !== "object") return { qrCode: "", qrCodeBase64: "" };
+    var txs = j.transactions;
+    if (txs && txs[0] && txs[0].pix) {
+      return {
+        qrCode: txs[0].pix.qrCode || "",
+        qrCodeBase64: txs[0].pix.qrCodeBase64 || "",
+      };
+    }
+    return { qrCode: "", qrCodeBase64: "" };
   }
 
   function isAdminSession() {
@@ -563,6 +655,11 @@
     if (el.inputSettingsPixChave) el.inputSettingsPixChave.value = store.settings.pixChave || "";
     if (el.inputSettingsPixNome) el.inputSettingsPixNome.value = store.settings.pixNome || "";
     if (el.inputSettingsPixCidade) el.inputSettingsPixCidade.value = store.settings.pixCidade || "";
+    if (el.selectSettingsPixMode) {
+      el.selectSettingsPixMode.value = store.settings.pixPaymentMode === "picpay" ? "picpay" : "manual";
+    }
+    if (el.inputSettingsPicpayProxy) el.inputSettingsPicpayProxy.value = store.settings.picpayProxyBaseUrl || "";
+    togglePicpaySettingsWrap();
     if (el.settingsPixMsg) el.settingsPixMsg.textContent = "";
   }
 
@@ -571,6 +668,12 @@
     if (el.inputSettingsPixChave) store.settings.pixChave = el.inputSettingsPixChave.value.trim();
     if (el.inputSettingsPixNome) store.settings.pixNome = el.inputSettingsPixNome.value.trim();
     if (el.inputSettingsPixCidade) store.settings.pixCidade = el.inputSettingsPixCidade.value.trim();
+    if (el.selectSettingsPixMode) {
+      store.settings.pixPaymentMode = el.selectSettingsPixMode.value === "picpay" ? "picpay" : "manual";
+    }
+    if (el.inputSettingsPicpayProxy) {
+      store.settings.picpayProxyBaseUrl = el.inputSettingsPicpayProxy.value.trim().replace(/\/$/, "");
+    }
     saveStore();
     if (el.settingsPixMsg) el.settingsPixMsg.textContent = "Dados PIX salvos.";
   }
@@ -708,6 +811,7 @@
       el.modalPublicValorLine.textContent = "Valor: " + formatMoney(c.precoPadrao);
     }
     if (el.inputPublicNome) el.inputPublicNome.value = "";
+    updatePublicFormPicpayVisibility();
     if (el.modalPublicStepForm) el.modalPublicStepForm.classList.remove("hidden");
     if (el.modalPublicStepPix) el.modalPublicStepPix.classList.add("hidden");
     if (el.modalPublicReserva) el.modalPublicReserva.classList.remove("hidden");
@@ -726,13 +830,107 @@
     }
     if (el.publicPixQr) el.publicPixQr.innerHTML = "";
     if (el.textareaPublicPix) el.textareaPublicPix.value = "";
+    setPublicPixLoading(false);
+    updatePublicFormPicpayVisibility();
   }
 
-  function abrirPassoPixPublico(c, nome, valor) {
+  /**
+   * @param {{ email: string, document: string, phone: { countryCode: string, areaCode: string, number: string, type: string } }} [buyer] obrigatório se isPicPayMode()
+   */
+  function abrirPassoPixPublico(c, nome, valor, buyer) {
     ensureSettings();
     if (el.modalPublicStepForm) el.modalPublicStepForm.classList.add("hidden");
     if (el.modalPublicStepPix) el.modalPublicStepPix.classList.remove("hidden");
     if (el.modalPublicPixValor) el.modalPublicPixValor.textContent = "Valor: " + formatMoney(valor);
+
+    if (isPicPayMode()) {
+      if (!buyer || !buyer.phone) {
+        if (el.textareaPublicPix) {
+          el.textareaPublicPix.value = "Dados do comprador incompletos para PicPay.";
+        }
+        return;
+      }
+      setPublicPixLoading(true);
+      if (el.textareaPublicPix) el.textareaPublicPix.value = "Gerando PIX via PicPay…";
+      if (el.publicPixQr) el.publicPixQr.innerHTML = "";
+
+      var base = String(store.settings.picpayProxyBaseUrl || "").replace(/\/$/, "");
+      var cents = Math.round(round2(valor) * 100);
+      if (cents < 1) {
+        setPublicPixLoading(false);
+        if (el.textareaPublicPix) el.textareaPublicPix.value = "Valor inválido para cobrança.";
+        return;
+      }
+
+      fetch(base + "/api/picpay/charge-pix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          merchantChargeId: buildPicPayMerchantChargeId(),
+          amountCents: cents,
+          customer: {
+            name: nome,
+            email: buyer.email,
+            document: buyer.document,
+            documentType: "CPF",
+            phone: buyer.phone,
+          },
+        }),
+      })
+        .then(function (r) {
+          return r.text().then(function (text) {
+            var j;
+            try {
+              j = JSON.parse(text);
+            } catch (e) {
+              j = { raw: text };
+            }
+            return { ok: r.ok, j: j };
+          });
+        })
+        .then(function (res) {
+          setPublicPixLoading(false);
+          if (!res.ok) {
+            var msg =
+              (res.j && res.j.error) ||
+              (res.j && res.j.details && JSON.stringify(res.j.details)) ||
+              JSON.stringify(res.j);
+            if (el.textareaPublicPix) el.textareaPublicPix.value = "Erro ao gerar PIX (PicPay): " + String(msg).slice(0, 1200);
+            return;
+          }
+          var qr = extractPixQrFromPicPayResponse(res.j);
+          var qrPayload = qr.qrCode;
+          var b64 = qr.qrCodeBase64;
+          if (el.textareaPublicPix) el.textareaPublicPix.value = qrPayload || "(sem código copia e cola na resposta)";
+
+          if (el.publicPixQr) {
+            el.publicPixQr.innerHTML = "";
+            if (b64) {
+              var img = document.createElement("img");
+              img.src = "data:image/png;base64," + b64;
+              img.alt = "QR Code PIX PicPay";
+              img.width = 200;
+              img.height = 200;
+              el.publicPixQr.appendChild(img);
+            } else if (qrPayload && typeof QRCode !== "undefined") {
+              try {
+                new QRCode(el.publicPixQr, { text: qrPayload, width: 200, height: 200 });
+              } catch (e) {
+                console.warn(e);
+              }
+            }
+          }
+        })
+        .catch(function (err) {
+          setPublicPixLoading(false);
+          if (el.textareaPublicPix) {
+            el.textareaPublicPix.value =
+              "Não foi possível falar com o servidor PicPay (CORS, URL ou rede). " +
+              String(err.message || err);
+          }
+        });
+      return;
+    }
 
     var txid = "S" + String(publicModalNumero) + "T" + Date.now().toString(36).toUpperCase().slice(-12);
     var payload = buildPixCopiaECola({
@@ -784,6 +982,30 @@
       if (el.inputPublicNome) el.inputPublicNome.focus();
       return;
     }
+    /** @type {{ email: string, document: string, phone: { countryCode: string, areaCode: string, number: string, type: string } } | undefined} */
+    var buyer;
+    if (isPicPayMode()) {
+      var email = el.inputPublicEmail ? el.inputPublicEmail.value.trim() : "";
+      var cpfDigits = el.inputPublicCpf ? el.inputPublicCpf.value.replace(/\D/g, "") : "";
+      var celRaw = el.inputPublicCelular ? el.inputPublicCelular.value : "";
+      if (!email || email.indexOf("@") < 0) {
+        alert("Informe um e-mail válido (exigido pela PicPay).");
+        if (el.inputPublicEmail) el.inputPublicEmail.focus();
+        return;
+      }
+      if (cpfDigits.length !== 11) {
+        alert("Informe o CPF com 11 dígitos (exigido pela PicPay).");
+        if (el.inputPublicCpf) el.inputPublicCpf.focus();
+        return;
+      }
+      var phone = parseBrMobileForPicPay(celRaw);
+      if (!phone) {
+        alert("Informe o celular com DDD e número (ex.: 11987654321).");
+        if (el.inputPublicCelular) el.inputPublicCelular.focus();
+        return;
+      }
+      buyer = { email: email, document: cpfDigits, phone: phone };
+    }
     if (c.precoPadrao <= 0) {
       alert("Preço não configurado.");
       return;
@@ -792,7 +1014,7 @@
     c.vendas[key] = { nome: nome, pago: false, valor: valor };
     saveStore();
     renderListaCartelas();
-    abrirPassoPixPublico(c, nome, valor);
+    abrirPassoPixPublico(c, nome, valor, buyer);
     var idCartela = publicModalCartelaId;
     if (el.selectPublicCartela && el.selectPublicCartela.value === idCartela) {
       onPublicCartelaChange();
@@ -2126,6 +2348,11 @@
   if (el.btnSettingsSalvarPix) {
     el.btnSettingsSalvarPix.addEventListener("click", function () {
       salvarSettingsPix();
+    });
+  }
+  if (el.selectSettingsPixMode) {
+    el.selectSettingsPixMode.addEventListener("change", function () {
+      togglePicpaySettingsWrap();
     });
   }
   if (el.formPublicReserva) {
