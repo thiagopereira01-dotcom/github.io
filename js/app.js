@@ -395,6 +395,66 @@
     });
   }
 
+  /**
+   * Ajusta a chave para o formato do BR Code / DICT: CPF/CNPJ só com dígitos;
+   * telefone em E.164 (+55…); e-mail minúsculo; EVP (UUID) minúsculo e sem espaços.
+   */
+  function normalizePixChave(raw) {
+    var s = String(raw || "")
+      .trim()
+      .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, "");
+    if (!s) return "";
+
+    if (s.indexOf("@") >= 0) {
+      return s.toLowerCase();
+    }
+
+    var noSpace = s.replace(/\s/g, "");
+    var uuidRe =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (uuidRe.test(noSpace)) {
+      return noSpace.toLowerCase();
+    }
+
+    var digits = noSpace.replace(/\D/g, "");
+    if (!digits) return s;
+
+    var looksPhoneMask = /[()+]/.test(s) || digits.length >= 12;
+
+    if (digits.length === 14) {
+      return digits;
+    }
+
+    if (digits.length === 13 && digits.slice(0, 2) === "55") {
+      return "+" + digits;
+    }
+
+    if (looksPhoneMask || (digits.length >= 12 && digits.indexOf("55") === 0)) {
+      if (digits.indexOf("55") === 0) {
+        return "+" + digits;
+      }
+      if (digits.length === 11 && /^[1-9][0-9]9[0-9]{8}$/.test(digits)) {
+        return "+55" + digits;
+      }
+      if (digits.length === 10) {
+        return "+55" + digits;
+      }
+    }
+
+    if (digits.length === 11) {
+      if (/^[1-9][0-9]9[0-9]{8}$/.test(digits)) {
+        return "+55" + digits;
+      }
+      return digits;
+    }
+
+    if (digits.length === 10) {
+      return "+55" + digits;
+    }
+
+    return s;
+  }
+
   function pixSanitize(str, maxLen) {
     var s = String(str || "")
       .normalize("NFD")
@@ -430,7 +490,7 @@
    * @param {{ chave: string, nome: string, cidade: string, amount: number, txid?: string }} o
    */
   function buildPixCopiaECola(o) {
-    var chave = String(o.chave || "").trim();
+    var chave = normalizePixChave(String(o.chave || "").trim());
     if (!chave) return "";
     var nome = pixSanitize(o.nome, 25) || "RECEBEDOR";
     var cidade = pixSanitize(o.cidade, 15) || "BRASIL";
@@ -444,7 +504,11 @@
     var keyField = emvTag("01", chave);
     var merchantAccount = emvTag("26", gui + keyField);
     var payload =
-      emvTag("00", "01") + merchantAccount + emvTag("52", "0000") + emvTag("53", "986");
+      emvTag("00", "01") +
+      emvTag("01", "11") +
+      merchantAccount +
+      emvTag("52", "0000") +
+      emvTag("53", "986");
     if (amountStr) payload += emvTag("54", amountStr);
     payload += emvTag("58", "BR") + emvTag("59", nome) + emvTag("60", cidade);
     payload += emvTag("62", emvTag("05", txid));

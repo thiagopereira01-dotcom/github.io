@@ -1,0 +1,25 @@
+{
+  "name": "Cartela de Sorteio",
+  "short_name": "Cartela",
+  "description": "Organize cartelas de rifa, vendas e PIX.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0f1218",
+  "theme_color": "#0f1218",
+  "icons": [
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
