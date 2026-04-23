@@ -376,29 +376,33 @@
     if (typeof store.settings.pixChave !== "string") store.settings.pixChave = "";
     if (typeof store.settings.pixNome !== "string") store.settings.pixNome = "";
     if (typeof store.settings.pixCidade !== "string") store.settings.pixCidade = "";
-    if (store.settings.pixPaymentMode !== "picpay" && store.settings.pixPaymentMode !== "manual") {
+    if (
+      store.settings.pixPaymentMode !== "picpay" &&
+      store.settings.pixPaymentMode !== "asaas" &&
+      store.settings.pixPaymentMode !== "manual"
+    ) {
       store.settings.pixPaymentMode = "manual";
     }
     if (typeof store.settings.picpayProxyBaseUrl !== "string") store.settings.picpayProxyBaseUrl = "";
   }
 
-  function isPicPayMode() {
+  function isGatewayPixMode() {
     ensureSettings();
-    return (
-      store.settings.pixPaymentMode === "picpay" &&
-      String(store.settings.picpayProxyBaseUrl || "").trim().length > 0
-    );
+    var url = String(store.settings.picpayProxyBaseUrl || "").trim();
+    if (!url) return false;
+    return store.settings.pixPaymentMode === "picpay" || store.settings.pixPaymentMode === "asaas";
   }
 
   function togglePicpaySettingsWrap() {
     if (!el.wrapSettingsPicpayProxy) return;
-    var picpay = el.selectSettingsPixMode && el.selectSettingsPixMode.value === "picpay";
-    el.wrapSettingsPicpayProxy.classList.toggle("hidden", !picpay);
+    var v = el.selectSettingsPixMode && el.selectSettingsPixMode.value;
+    var show = v === "picpay" || v === "asaas";
+    el.wrapSettingsPicpayProxy.classList.toggle("hidden", !show);
   }
 
   function updatePublicFormPicpayVisibility() {
     if (!el.wrapPublicPicpayFields) return;
-    var on = isPicPayMode();
+    var on = isGatewayPixMode();
     el.wrapPublicPicpayFields.classList.toggle("hidden", !on);
     if (!on) {
       if (el.inputPublicEmail) el.inputPublicEmail.value = "";
@@ -656,7 +660,9 @@
     if (el.inputSettingsPixNome) el.inputSettingsPixNome.value = store.settings.pixNome || "";
     if (el.inputSettingsPixCidade) el.inputSettingsPixCidade.value = store.settings.pixCidade || "";
     if (el.selectSettingsPixMode) {
-      el.selectSettingsPixMode.value = store.settings.pixPaymentMode === "picpay" ? "picpay" : "manual";
+      var pm = store.settings.pixPaymentMode;
+      el.selectSettingsPixMode.value =
+        pm === "picpay" || pm === "asaas" ? pm : "manual";
     }
     if (el.inputSettingsPicpayProxy) el.inputSettingsPicpayProxy.value = store.settings.picpayProxyBaseUrl || "";
     togglePicpaySettingsWrap();
@@ -669,7 +675,8 @@
     if (el.inputSettingsPixNome) store.settings.pixNome = el.inputSettingsPixNome.value.trim();
     if (el.inputSettingsPixCidade) store.settings.pixCidade = el.inputSettingsPixCidade.value.trim();
     if (el.selectSettingsPixMode) {
-      store.settings.pixPaymentMode = el.selectSettingsPixMode.value === "picpay" ? "picpay" : "manual";
+      var v = el.selectSettingsPixMode.value;
+      store.settings.pixPaymentMode = v === "picpay" || v === "asaas" ? v : "manual";
     }
     if (el.inputSettingsPicpayProxy) {
       store.settings.picpayProxyBaseUrl = el.inputSettingsPicpayProxy.value.trim().replace(/\/$/, "");
@@ -835,7 +842,7 @@
   }
 
   /**
-   * @param {{ email: string, document: string, phone: { countryCode: string, areaCode: string, number: string, type: string } }} [buyer] obrigatório se isPicPayMode()
+   * @param {{ email: string, document: string, phone: { countryCode: string, areaCode: string, number: string, type: string } }} [buyer] obrigatório se isGatewayPixMode()
    */
   function abrirPassoPixPublico(c, nome, valor, buyer) {
     ensureSettings();
@@ -843,15 +850,18 @@
     if (el.modalPublicStepPix) el.modalPublicStepPix.classList.remove("hidden");
     if (el.modalPublicPixValor) el.modalPublicPixValor.textContent = "Valor: " + formatMoney(valor);
 
-    if (isPicPayMode()) {
+    if (isGatewayPixMode()) {
       if (!buyer || !buyer.phone) {
         if (el.textareaPublicPix) {
-          el.textareaPublicPix.value = "Dados do comprador incompletos para PicPay.";
+          el.textareaPublicPix.value = "Dados do comprador incompletos para o gateway de pagamento.";
         }
         return;
       }
       setPublicPixLoading(true);
-      if (el.textareaPublicPix) el.textareaPublicPix.value = "Gerando PIX via PicPay…";
+      if (el.textareaPublicPix) {
+        el.textareaPublicPix.value =
+          store.settings.pixPaymentMode === "asaas" ? "Gerando PIX via Asaas…" : "Gerando PIX via PicPay…";
+      }
       if (el.publicPixQr) el.publicPixQr.innerHTML = "";
 
       var base = String(store.settings.picpayProxyBaseUrl || "").replace(/\/$/, "");
@@ -862,7 +872,10 @@
         return;
       }
 
-      fetch(base + "/api/picpay/charge-pix", {
+      var path =
+        store.settings.pixPaymentMode === "asaas" ? "/api/asaas/charge-pix" : "/api/picpay/charge-pix";
+
+      fetch(base + path, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify({
@@ -895,7 +908,10 @@
               (res.j && res.j.error) ||
               (res.j && res.j.details && JSON.stringify(res.j.details)) ||
               JSON.stringify(res.j);
-            if (el.textareaPublicPix) el.textareaPublicPix.value = "Erro ao gerar PIX (PicPay): " + String(msg).slice(0, 1200);
+            if (el.textareaPublicPix) {
+              el.textareaPublicPix.value =
+                "Erro ao gerar PIX: " + String(msg).slice(0, 1200);
+            }
             return;
           }
           var qr = extractPixQrFromPicPayResponse(res.j);
@@ -908,7 +924,7 @@
             if (b64) {
               var img = document.createElement("img");
               img.src = "data:image/png;base64," + b64;
-              img.alt = "QR Code PIX PicPay";
+              img.alt = "QR Code PIX";
               img.width = 200;
               img.height = 200;
               el.publicPixQr.appendChild(img);
@@ -925,7 +941,7 @@
           setPublicPixLoading(false);
           if (el.textareaPublicPix) {
             el.textareaPublicPix.value =
-              "Não foi possível falar com o servidor PicPay (CORS, URL ou rede). " +
+              "Não foi possível falar com o servidor de pagamento (CORS, URL ou rede). " +
               String(err.message || err);
           }
         });
@@ -984,17 +1000,17 @@
     }
     /** @type {{ email: string, document: string, phone: { countryCode: string, areaCode: string, number: string, type: string } } | undefined} */
     var buyer;
-    if (isPicPayMode()) {
+    if (isGatewayPixMode()) {
       var email = el.inputPublicEmail ? el.inputPublicEmail.value.trim() : "";
       var cpfDigits = el.inputPublicCpf ? el.inputPublicCpf.value.replace(/\D/g, "") : "";
       var celRaw = el.inputPublicCelular ? el.inputPublicCelular.value : "";
       if (!email || email.indexOf("@") < 0) {
-        alert("Informe um e-mail válido (exigido pela PicPay).");
+        alert("Informe um e-mail válido (exigido pelo provedor de pagamento).");
         if (el.inputPublicEmail) el.inputPublicEmail.focus();
         return;
       }
       if (cpfDigits.length !== 11) {
-        alert("Informe o CPF com 11 dígitos (exigido pela PicPay).");
+        alert("Informe o CPF com 11 dígitos (exigido pelo provedor de pagamento).");
         if (el.inputPublicCpf) el.inputPublicCpf.focus();
         return;
       }

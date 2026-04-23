@@ -145,22 +145,23 @@
                 <span class="field-label">Forma de gerar o PIX na compra pública</span>
                 <select id="select-settings-pix-mode" aria-describedby="hint-pix-mode">
                   <option value="manual">PIX com chave (código gerado no navegador)</option>
-                  <option value="picpay">PicPay — API (QR oficial; exige servidor)</option>
+                  <option value="picpay">PicPay — API (exige servidor)</option>
+                  <option value="asaas">Asaas — API PIX (exige servidor)</option>
                 </select>
               </label>
               <p id="hint-pix-mode" class="field-hint">
-                PicPay não permite colocar <code>client_secret</code> no site estático. Use o servidor em
-                <code>server/</code> (Render Web Service), com variáveis <code>PICPAY_CLIENT_ID</code> e
-                <code>PICPAY_CLIENT_SECRET</code>, e liste a URL do site em <code>ALLOWED_ORIGINS</code>.
+                PicPay: no servidor, <code>PICPAY_CLIENT_ID</code> e <code>PICPAY_CLIENT_SECRET</code>. Asaas:
+                <code>ASAAS_API_KEY</code> (Integrações → Chave de API). Em ambos: defina
+                <code>ALLOWED_ORIGINS</code> com a URL exata do site da cartela (sem barra no fim).
               </p>
               <div id="wrap-settings-picpay-proxy" class="hidden">
                 <label class="field">
-                  <span class="field-label">URL pública do servidor PicPay (sem barra no final)</span>
+                  <span class="field-label">URL pública do servidor Node (Render etc., sem barra no final)</span>
                   <input
                     type="url"
                     id="input-settings-picpay-proxy"
                     maxlength="200"
-                    placeholder="https://cartela-picpay.onrender.com"
+                    placeholder="https://seu-gateway.onrender.com"
                     autocomplete="off"
                   />
                 </label>
@@ -604,7 +605,7 @@
                 autocomplete="tel-national"
               />
             </label>
-            <p class="field-hint">A PicPay exige estes dados para criar a cobrança PIX.</p>
+            <p class="field-hint">PicPay e Asaas exigem estes dados para criar a cobrança PIX.</p>
           </div>
           <p class="field-hint">
             O número fica reservado como <strong>não pago</strong> até o organizador confirmar no painel.

@@ -1,7 +1,9 @@
 /**
- * Proxy PicPay PIX — use com Web Service no Render (ou outro Node).
- * Variáveis: PICPAY_CLIENT_ID, PICPAY_CLIENT_SECRET, ALLOWED_ORIGINS (origens do site estático, separadas por vírgula)
- * Opcional: PICPAY_API_BASE (padrão https://checkout-api.picpay.com), PICPAY_PIX_EXPIRATION_SEC (padrão 900)
+ * Gateway PIX — PicPay e/ou Asaas (mesmo serviço Node).
+ *
+ * PicPay: PICPAY_CLIENT_ID, PICPAY_CLIENT_SECRET, opcional PICPAY_API_BASE, PICPAY_PIX_EXPIRATION_SEC
+ * Asaas: ASAAS_API_KEY (header access_token), opcional ASAAS_API_BASE (senão deduz sandbox/prod pela chave)
+ * Comum: ALLOWED_ORIGINS (origens do site estático, vírgula). User-Agent fixo (exigência Asaas).
  */
 "use strict";
 
@@ -78,8 +80,62 @@ function getToken() {
   });
 }
 
+function getAsaasBase() {
+  var b = (process.env.ASAAS_API_BASE || "").replace(/\/$/, "");
+  if (b) return b;
+  var key = process.env.ASAAS_API_KEY || "";
+  if (key.indexOf("$aact_hmlg_") === 0) return "https://api-sandbox.asaas.com";
+  return "https://api.asaas.com";
+}
+
+function asaasHeaders() {
+  var key = process.env.ASAAS_API_KEY;
+  if (!key) return null;
+  return {
+    accept: "application/json",
+    "content-type": "application/json",
+    access_token: key,
+    "user-agent": process.env.ASAAS_USER_AGENT || "CartelaSorteio/1.0 (gateway-pix)",
+  };
+}
+
+function dueDateSaoPaulo() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+function normalizeAsaasQrBase64(encodedImage) {
+  if (!encodedImage || typeof encodedImage !== "string") return "";
+  var s = encodedImage.trim();
+  if (s.charAt(0) === "=") s = s.slice(1);
+  if (s.indexOf("data:image") === 0) return s.split(",").pop() || s;
+  return s;
+}
+
+function respondPixCompatible(res, qrPayload, encodedImage) {
+  res.json({
+    transactions: [
+      {
+        pix: {
+          qrCode: qrPayload || "",
+          qrCodeBase64: normalizeAsaasQrBase64(encodedImage),
+        },
+      },
+    ],
+  });
+}
+
 app.get("/api/health", function (_req, res) {
-  res.json({ ok: true, service: "cartela-picpay-proxy" });
+  res.json({
+    ok: true,
+    service: "cartela-gateway-pix",
+    picpay: !!(process.env.PICPAY_CLIENT_ID && process.env.PICPAY_CLIENT_SECRET),
+    asaas: !!process.env.ASAAS_API_KEY,
+  });
 });
 
 /**
@@ -185,7 +241,151 @@ app.post("/api/picpay/charge-pix", function (req, res) {
     });
 });
 
+/**
+ * Asaas: cria cliente, cobrança PIX e retorna QR no mesmo formato que o front já espera (transactions[0].pix).
+ * Body igual ao PicPay: { merchantChargeId, amountCents, customer: { name, email, document, phone } }
+ */
+app.post("/api/asaas/charge-pix", function (req, res) {
+  var headers = asaasHeaders();
+  if (!headers) {
+    return res.status(503).json({ error: "ASAAS_API_KEY não configurada no servidor" });
+  }
+
+  var body = req.body || {};
+  var merchantChargeId = body.merchantChargeId;
+  var amountCents = body.amountCents;
+  var customer = body.customer;
+
+  if (!merchantChargeId || typeof merchantChargeId !== "string") {
+    return res.status(400).json({ error: "merchantChargeId obrigatório" });
+  }
+  if (typeof amountCents !== "number" || amountCents < 1) {
+    return res.status(400).json({ error: "amountCents deve ser inteiro >= 1 (centavos)" });
+  }
+  if (!customer || typeof customer !== "object") {
+    return res.status(400).json({ error: "customer obrigatório" });
+  }
+  var doc = String(customer.document || "").replace(/\D/g, "");
+  if (!customer.name || !customer.email || (doc.length !== 11 && doc.length !== 14)) {
+    return res
+      .status(400)
+      .json({ error: "customer.name, customer.email e CPF (11 dígitos) ou CNPJ (14) em customer.document" });
+  }
+  var ph = customer.phone;
+  if (!ph || !ph.areaCode || !ph.number) {
+    return res.status(400).json({ error: "customer.phone com areaCode e number" });
+  }
+
+  var mobileDigits = String(ph.areaCode) + String(ph.number).replace(/\D/g, "");
+  var base = getAsaasBase();
+  var valueReais = Number((Math.round(amountCents) / 100).toFixed(2));
+
+  var extRef = String(merchantChargeId).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 100);
+  if (!extRef) extRef = "cartela-" + Date.now();
+
+  fetch(base + "/v3/customers", {
+    method: "POST",
+    headers: headers,
+    body: JSON.stringify({
+      name: String(customer.name).trim(),
+      cpfCnpj: doc.length === 11 ? doc : doc.slice(0, 14),
+      email: String(customer.email).trim().toLowerCase(),
+      mobilePhone: mobileDigits.replace(/\D/g, ""),
+      notificationDisabled: true,
+      externalReference: extRef.slice(0, 50),
+    }),
+  })
+    .then(function (r) {
+      return r.text().then(function (text) {
+        var j;
+        try {
+          j = JSON.parse(text);
+        } catch (e) {
+          j = { raw: text };
+        }
+        return { ok: r.ok, status: r.status, j: j };
+      });
+    })
+    .then(function (custRes) {
+      if (!custRes.ok) {
+        res.status(custRes.status).json({ error: "Asaas (cliente)", details: custRes.j });
+        return null;
+      }
+      var custId = custRes.j && custRes.j.id;
+      if (!custId) {
+        res.status(500).json({ error: "Asaas: resposta de cliente sem id", details: custRes.j });
+        return null;
+      }
+      return fetch(base + "/v3/payments", {
+        method: "POST",
+        headers: headers,
+        body: JSON.stringify({
+          customer: custId,
+          billingType: "PIX",
+          value: valueReais,
+          dueDate: dueDateSaoPaulo(),
+          description: "Reserva número — " + extRef.slice(0, 80),
+          externalReference: extRef.slice(0, 100),
+        }),
+      }).then(function (r) {
+        return r.text().then(function (text) {
+          var j;
+          try {
+            j = JSON.parse(text);
+          } catch (e) {
+            j = { raw: text };
+          }
+          return { ok: r.ok, status: r.status, j: j };
+        });
+      });
+    })
+    .then(function (payRes) {
+      if (payRes == null) return null;
+      if (!payRes.ok) {
+        res.status(payRes.status).json({ error: "Asaas (cobrança)", details: payRes.j });
+        return null;
+      }
+      var payId = payRes.j && payRes.j.id;
+      if (!payId) {
+        res.status(500).json({ error: "Asaas: cobrança sem id", details: payRes.j });
+        return null;
+      }
+      return fetch(base + "/v3/payments/" + encodeURIComponent(payId) + "/pixQrCode", {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          access_token: headers.access_token,
+          "user-agent": headers["user-agent"],
+        },
+      }).then(function (r) {
+        return r.text().then(function (text) {
+          var j;
+          try {
+            j = JSON.parse(text);
+          } catch (e) {
+            j = { raw: text };
+          }
+          return { ok: r.ok, status: r.status, j: j };
+        });
+      });
+    })
+    .then(function (qrRes) {
+      if (qrRes == null) return;
+      if (!qrRes.ok) {
+        res.status(qrRes.status).json({ error: "Asaas (QR Code PIX)", details: qrRes.j });
+        return;
+      }
+      var payload = (qrRes.j && qrRes.j.payload) || "";
+      var img = (qrRes.j && qrRes.j.encodedImage) || "";
+      respondPixCompatible(res, payload, img);
+    })
+    .catch(function (e) {
+      console.error(e);
+      if (!res.headersSent) res.status(500).json({ error: String(e.message || e) });
+    });
+});
+
 var port = parseInt(process.env.PORT || "8787", 10);
 app.listen(port, function () {
-  console.log("PicPay proxy escutando na porta " + port);
+  console.log("Gateway PIX (PicPay/Asaas) na porta " + port);
 });
