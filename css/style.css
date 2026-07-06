@@ -1141,3 +1141,26 @@ select {
   resize: vertical;
   min-height: 5rem;
 }
+
+.public-infinitepay-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0.5rem 0 1rem;
+}
+
+.public-infinitepay-status {
+  font-size: 0.92rem;
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.public-infinitepay-status.is-paid {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.public-infinitepay-open {
+  text-align: center;
+  text-decoration: none;
+}

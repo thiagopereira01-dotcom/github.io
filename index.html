@@ -145,14 +145,17 @@
                 <span class="field-label">Forma de gerar o PIX na compra pública</span>
                 <select id="select-settings-pix-mode" aria-describedby="hint-pix-mode">
                   <option value="manual">PIX com chave (código gerado no navegador)</option>
+                  <option value="infinitepay">InfinitePay — checkout integrado (exige servidor)</option>
                   <option value="picpay">PicPay — API (exige servidor)</option>
                   <option value="asaas">Asaas — API PIX (exige servidor)</option>
                 </select>
               </label>
               <p id="hint-pix-mode" class="field-hint">
-                PicPay: no servidor, <code>PICPAY_CLIENT_ID</code> e <code>PICPAY_CLIENT_SECRET</code>. Asaas:
-                <code>ASAAS_API_KEY</code> (Integrações → Chave de API). Em ambos: defina
-                <code>ALLOWED_ORIGINS</code> com a URL exata do site da cartela (sem barra no fim).
+                InfinitePay: no servidor, <code>INFINITEPAY_HANDLE</code> (sua InfiniteTag sem o
+                <code>$</code>). PicPay: <code>PICPAY_CLIENT_ID</code> e
+                <code>PICPAY_CLIENT_SECRET</code>. Asaas: <code>ASAAS_API_KEY</code> (Integrações →
+                Chave de API). Em todos: defina <code>ALLOWED_ORIGINS</code> com a URL exata do site da
+                cartela (sem barra no fim).
               </p>
               <div id="wrap-settings-picpay-proxy" class="hidden">
                 <label class="field">
@@ -439,6 +442,10 @@
           <input type="checkbox" id="input-pago" name="pago" />
           <span>Marcar como pago</span>
         </label>
+        <p id="venda-infinitepay-hint" class="field-hint hidden" role="status"></p>
+        <button type="button" id="btn-venda-verificar-infinitepay" class="btn btn-ghost btn-sm hidden">
+          Verificar pagamento InfinitePay
+        </button>
         <div class="modal-actions">
           <button type="button" id="btn-cancelar-venda" class="btn btn-ghost">Cancelar</button>
           <button type="button" id="btn-remover-venda" class="btn btn-danger hidden">Devolver número</button>
@@ -605,7 +612,7 @@
                 autocomplete="tel-national"
               />
             </label>
-            <p class="field-hint">PicPay e Asaas exigem estes dados para criar a cobrança PIX.</p>
+            <p class="field-hint">PicPay, Asaas e InfinitePay exigem estes dados para criar a cobrança PIX.</p>
           </div>
           <p class="field-hint">
             O número fica reservado como <strong>não pago</strong> até o organizador confirmar no painel.
@@ -617,14 +624,27 @@
         </form>
       </div>
       <div id="modal-public-step-pix" class="hidden">
-        <p class="public-pix-lede">Pague com PIX no valor abaixo. Depois avise o organizador se necessário.</p>
+        <p id="public-pix-lede" class="public-pix-lede">Pague com PIX no valor abaixo. Depois avise o organizador se necessário.</p>
         <p id="modal-public-pix-valor" class="public-valor-line"></p>
         <p id="public-pix-loading" class="field-hint hidden" role="status">Gerando código PIX…</p>
-        <div id="public-pix-qr" class="public-pix-qr"></div>
-        <label class="field">
-          <span class="field-label">Copia e cola</span>
-          <textarea id="textarea-public-pix" class="public-pix-textarea" readonly rows="4"></textarea>
-        </label>
+        <div id="public-infinitepay-wrap" class="public-infinitepay-wrap hidden">
+          <p id="public-infinitepay-status" class="public-infinitepay-status" role="status">Aguardando pagamento…</p>
+          <a
+            id="btn-public-infinitepay-open"
+            class="btn btn-primary public-infinitepay-open"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+          >Abrir página de pagamento</a>
+          <p class="field-hint">O pagamento é confirmado automaticamente quando você concluir na InfinitePay.</p>
+        </div>
+        <div id="public-pix-qr-wrap">
+          <div id="public-pix-qr" class="public-pix-qr"></div>
+          <label class="field">
+            <span class="field-label">Copia e cola</span>
+            <textarea id="textarea-public-pix" class="public-pix-textarea" readonly rows="4"></textarea>
+          </label>
+        </div>
         <div class="modal-actions">
           <button type="button" id="btn-public-copiar-pix" class="btn btn-primary">Copiar código PIX</button>
           <button type="button" id="btn-public-fechar-pix" class="btn btn-ghost">Fechar</button>

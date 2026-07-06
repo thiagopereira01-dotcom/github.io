@@ -1,8 +1,9 @@
 /**
- * Gateway PIX — PicPay e/ou Asaas (mesmo serviço Node).
+ * Gateway PIX — PicPay, Asaas e/ou InfinitePay (mesmo serviço Node).
  *
  * PicPay: PICPAY_CLIENT_ID, PICPAY_CLIENT_SECRET, opcional PICPAY_API_BASE, PICPAY_PIX_EXPIRATION_SEC
  * Asaas: ASAAS_API_KEY (header access_token), opcional ASAAS_API_BASE (senão deduz sandbox/prod pela chave)
+ * InfinitePay: INFINITEPAY_HANDLE (InfiniteTag sem $), opcional PUBLIC_SERVER_URL (webhook)
  * Comum: ALLOWED_ORIGINS (origens do site estático, vírgula). User-Agent fixo (exigência Asaas).
  */
 "use strict";
@@ -36,6 +37,38 @@ app.use(
 );
 
 var tokenCache = { access_token: null, expiresAt: 0 };
+
+var INFINITEPAY_API = "https://api.infinitepay.io";
+
+/** @type {Record<string, { paid: boolean, at: number, payload?: object }>} */
+var infinitepayPaidOrders = {};
+
+function getInfinitepayHandle() {
+  var h = (process.env.INFINITEPAY_HANDLE || "").trim().replace(/^\$/, "");
+  return h || null;
+}
+
+function getPublicServerUrl(req) {
+  var fromEnv = (process.env.PUBLIC_SERVER_URL || "").trim().replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  var proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  var host = req.headers["x-forwarded-host"] || req.headers.host;
+  if (!host) return "";
+  return String(proto).split(",")[0].trim() + "://" + String(host).split(",")[0].trim();
+}
+
+function infinitepayPhone(customer) {
+  if (!customer || !customer.phone) return undefined;
+  var ph = customer.phone;
+  var cc = String(ph.countryCode || "55").replace(/\D/g, "");
+  var digits = String(ph.areaCode || "") + String(ph.number || "").replace(/\D/g, "");
+  digits = digits.replace(/\D/g, "");
+  if (!digits) return undefined;
+  if (digits.indexOf(cc) === 0 && digits.length > cc.length + 8) {
+    return "+" + digits;
+  }
+  return "+" + cc + digits;
+}
 
 function getApiBase() {
   return (process.env.PICPAY_API_BASE || "https://checkout-api.picpay.com").replace(/\/$/, "");
@@ -135,6 +168,7 @@ app.get("/api/health", function (_req, res) {
     service: "cartela-gateway-pix",
     picpay: !!(process.env.PICPAY_CLIENT_ID && process.env.PICPAY_CLIENT_SECRET),
     asaas: !!process.env.ASAAS_API_KEY,
+    infinitepay: !!getInfinitepayHandle(),
   });
 });
 
@@ -385,7 +419,185 @@ app.post("/api/asaas/charge-pix", function (req, res) {
     });
 });
 
+/**
+ * InfinitePay: cria link de checkout (Pix ou cartão na página InfinitePay).
+ * Body: { merchantChargeId, amountCents, description?, redirectUrl?, customer? }
+ */
+app.post("/api/infinitepay/charge-pix", function (req, res) {
+  var handle = getInfinitepayHandle();
+  if (!handle) {
+    return res.status(503).json({ error: "INFINITEPAY_HANDLE não configurado no servidor" });
+  }
+
+  var body = req.body || {};
+  var merchantChargeId = body.merchantChargeId;
+  var amountCents = body.amountCents;
+  var customer = body.customer;
+
+  if (!merchantChargeId || typeof merchantChargeId !== "string") {
+    return res.status(400).json({ error: "merchantChargeId obrigatório" });
+  }
+  if (typeof amountCents !== "number" || amountCents < 1) {
+    return res.status(400).json({ error: "amountCents deve ser inteiro >= 1 (centavos)" });
+  }
+
+  var orderNsu = String(merchantChargeId).replace(/[^a-zA-Z0-9-]/g, "").slice(0, 36);
+  if (orderNsu.length < 6) orderNsu = "ord" + Date.now().toString(36);
+
+  var description =
+    typeof body.description === "string" && body.description.trim()
+      ? body.description.trim().slice(0, 120)
+      : "Reserva número — " + orderNsu;
+
+  var publicUrl = getPublicServerUrl(req);
+  var payload = {
+    handle: handle,
+    itens: [
+      {
+        quantity: 1,
+        price: Math.round(amountCents),
+        description: description,
+      },
+    ],
+    order_nsu: orderNsu,
+  };
+
+  if (typeof body.redirectUrl === "string" && body.redirectUrl.trim()) {
+    payload.redirect_url = body.redirectUrl.trim().slice(0, 500);
+  }
+  if (publicUrl) {
+    payload.webhook_url = publicUrl + "/api/infinitepay/webhook";
+  }
+
+  if (customer && typeof customer === "object" && customer.name) {
+    var cust = {
+      name: String(customer.name).trim().slice(0, 120),
+    };
+    if (customer.email) cust.email = String(customer.email).trim().toLowerCase().slice(0, 120);
+    var phone = infinitepayPhone(customer);
+    if (phone) cust.phone_number = phone;
+    payload.customer = cust;
+  }
+
+  fetch(INFINITEPAY_API + "/invoices/public/checkout/links", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then(function (r) {
+      return r.text().then(function (text) {
+        var j;
+        try {
+          j = JSON.parse(text);
+        } catch (e) {
+          j = { raw: text };
+        }
+        return { ok: r.ok, status: r.status, j: j };
+      });
+    })
+    .then(function (out) {
+      if (!out.ok) {
+        return res.status(out.status).json({ error: "InfinitePay", details: out.j });
+      }
+      var j = out.j || {};
+      var checkoutUrl = j.checkout_url || j.link || j.url || "";
+      var slug = j.slug || j.invoice_slug || "";
+      if (!checkoutUrl) {
+        return res.status(502).json({ error: "InfinitePay: resposta sem checkout_url", details: j });
+      }
+      res.json({
+        provider: "infinitepay",
+        checkoutUrl: checkoutUrl,
+        slug: slug,
+        orderNsu: orderNsu,
+      });
+    })
+    .catch(function (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message || e) });
+    });
+});
+
+/**
+ * InfinitePay: consulta status do pagamento (proxy para payment_check).
+ * Body: { order_nsu, slug, transaction_nsu? }
+ */
+app.post("/api/infinitepay/payment-check", function (req, res) {
+  var handle = getInfinitepayHandle();
+  if (!handle) {
+    return res.status(503).json({ error: "INFINITEPAY_HANDLE não configurado no servidor" });
+  }
+
+  var body = req.body || {};
+  var orderNsu = body.order_nsu || body.orderNsu;
+  var slug = body.slug;
+  if (!orderNsu) {
+    return res.status(400).json({ error: "order_nsu obrigatório" });
+  }
+
+  var cached = infinitepayPaidOrders[String(orderNsu)];
+  if (cached && cached.paid) {
+    return res.json({
+      success: true,
+      paid: true,
+      source: "webhook",
+      amount: cached.payload && cached.payload.amount,
+      paid_amount: cached.payload && cached.payload.paid_amount,
+      capture_method: cached.payload && cached.payload.capture_method,
+    });
+  }
+
+  var checkPayload = {
+    handle: handle,
+    order_nsu: String(orderNsu),
+  };
+  if (slug) checkPayload.slug = String(slug);
+  if (body.transaction_nsu) checkPayload.transaction_nsu = String(body.transaction_nsu);
+
+  fetch(INFINITEPAY_API + "/invoices/public/checkout/payment_check", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(checkPayload),
+  })
+    .then(function (r) {
+      return r.text().then(function (text) {
+        var j;
+        try {
+          j = JSON.parse(text);
+        } catch (e) {
+          j = { raw: text };
+        }
+        if (!r.ok) {
+          return res.status(r.status).json({ error: "InfinitePay (payment_check)", details: j });
+        }
+        if (j && j.paid) {
+          infinitepayPaidOrders[String(orderNsu)] = { paid: true, at: Date.now(), payload: j };
+        }
+        res.json(j);
+      });
+    })
+    .catch(function (e) {
+      console.error(e);
+      res.status(500).json({ error: String(e.message || e) });
+    });
+});
+
+/** Webhook InfinitePay — responda 200 OK para confirmar recebimento. */
+app.post("/api/infinitepay/webhook", function (req, res) {
+  var body = req.body || {};
+  var orderNsu = body.order_nsu;
+  if (orderNsu) {
+    infinitepayPaidOrders[String(orderNsu)] = {
+      paid: true,
+      at: Date.now(),
+      payload: body,
+    };
+    console.log("InfinitePay webhook: pago order_nsu=" + orderNsu);
+  }
+  res.status(200).json({ ok: true });
+});
+
 var port = parseInt(process.env.PORT || "8787", 10);
 app.listen(port, function () {
-  console.log("Gateway PIX (PicPay/Asaas) na porta " + port);
+  console.log("Gateway PIX (PicPay/Asaas/InfinitePay) na porta " + port);
 });

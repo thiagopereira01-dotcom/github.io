@@ -23,6 +23,8 @@
   var publicModalCartelaId = null;
   /** @type {number | null} */
   var publicModalNumero = null;
+  /** @type {ReturnType<typeof setInterval> | null} */
+  var infinitepayPollTimer = null;
 
   var el = {
     screenSetup: document.getElementById("screen-setup"),
@@ -80,6 +82,8 @@
     inputPago: document.getElementById("input-pago"),
     btnCancelarVenda: document.getElementById("btn-cancelar-venda"),
     btnRemoverVenda: document.getElementById("btn-remover-venda"),
+    vendaInfinitepayHint: document.getElementById("venda-infinitepay-hint"),
+    btnVendaVerificarInfinitepay: document.getElementById("btn-venda-verificar-infinitepay"),
     modalSorteio: document.getElementById("modal-sorteio"),
     sorteioHint: document.getElementById("sorteio-hint"),
     sorteioResult: document.getElementById("sorteio-result"),
@@ -137,6 +141,11 @@
     inputPublicCpf: document.getElementById("input-public-cpf"),
     inputPublicCelular: document.getElementById("input-public-celular"),
     publicPixLoading: document.getElementById("public-pix-loading"),
+    publicPixLede: document.getElementById("public-pix-lede"),
+    publicInfinitepayWrap: document.getElementById("public-infinitepay-wrap"),
+    publicInfinitepayStatus: document.getElementById("public-infinitepay-status"),
+    btnPublicInfinitepayOpen: document.getElementById("btn-public-infinitepay-open"),
+    publicPixQrWrap: document.getElementById("public-pix-qr-wrap"),
   };
 
   /** @type {number | null} */
@@ -379,6 +388,7 @@
     if (
       store.settings.pixPaymentMode !== "picpay" &&
       store.settings.pixPaymentMode !== "asaas" &&
+      store.settings.pixPaymentMode !== "infinitepay" &&
       store.settings.pixPaymentMode !== "manual"
     ) {
       store.settings.pixPaymentMode = "manual";
@@ -390,13 +400,22 @@
     ensureSettings();
     var url = String(store.settings.picpayProxyBaseUrl || "").trim();
     if (!url) return false;
-    return store.settings.pixPaymentMode === "picpay" || store.settings.pixPaymentMode === "asaas";
+    return (
+      store.settings.pixPaymentMode === "picpay" ||
+      store.settings.pixPaymentMode === "asaas" ||
+      store.settings.pixPaymentMode === "infinitepay"
+    );
+  }
+
+  function isInfinitepayMode() {
+    ensureSettings();
+    return store.settings.pixPaymentMode === "infinitepay" && !!String(store.settings.picpayProxyBaseUrl || "").trim();
   }
 
   function togglePicpaySettingsWrap() {
     if (!el.wrapSettingsPicpayProxy) return;
     var v = el.selectSettingsPixMode && el.selectSettingsPixMode.value;
-    var show = v === "picpay" || v === "asaas";
+    var show = v === "picpay" || v === "asaas" || v === "infinitepay";
     el.wrapSettingsPicpayProxy.classList.toggle("hidden", !show);
   }
 
@@ -414,6 +433,91 @@
   function setPublicPixLoading(on) {
     if (el.publicPixLoading) el.publicPixLoading.classList.toggle("hidden", !on);
     if (el.btnPublicCopiarPix) el.btnPublicCopiarPix.disabled = !!on;
+  }
+
+  function stopInfinitepayPoll() {
+    if (infinitepayPollTimer) {
+      clearInterval(infinitepayPollTimer);
+      infinitepayPollTimer = null;
+    }
+  }
+
+  function setPublicPixStepMode(mode) {
+    var isInfinite = mode === "infinitepay";
+    if (el.publicInfinitepayWrap) el.publicInfinitepayWrap.classList.toggle("hidden", !isInfinite);
+    if (el.publicPixQrWrap) el.publicPixQrWrap.classList.toggle("hidden", isInfinite);
+    if (el.btnPublicCopiarPix) el.btnPublicCopiarPix.classList.toggle("hidden", isInfinite);
+    if (el.publicPixLede) {
+      el.publicPixLede.textContent = isInfinite
+        ? "Abra a página da InfinitePay para pagar com Pix ou cartão. O status é atualizado automaticamente."
+        : "Pague com PIX no valor abaixo. Depois avise o organizador se necessário.";
+    }
+    if (isInfinite && el.publicInfinitepayStatus) {
+      el.publicInfinitepayStatus.textContent = "Aguardando pagamento…";
+      el.publicInfinitepayStatus.classList.remove("is-paid");
+    }
+  }
+
+  function markPublicVendaPaga(cartelaId, numero) {
+    var c = getCartela(cartelaId);
+    if (!c) return false;
+    var key = String(numero);
+    if (!c.vendas[key]) return false;
+    c.vendas[key].pago = true;
+    saveStore();
+    renderListaCartelas();
+    if (el.selectPublicCartela && el.selectPublicCartela.value === cartelaId) {
+      onPublicCartelaChange();
+    }
+    if (store.activeId === cartelaId && getActiveCartela()) {
+      renderGrid();
+      updateToolbar();
+      updateFinancePanel();
+    }
+    return true;
+  }
+
+  function startInfinitepayPoll(cartelaId, numero, orderNsu, slug) {
+    stopInfinitepayPoll();
+    var base = String(store.settings.picpayProxyBaseUrl || "").replace(/\/$/, "");
+    if (!base || !orderNsu) return;
+
+    function checkOnce() {
+      fetch(base + "/api/infinitepay/payment-check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ order_nsu: orderNsu, slug: slug || undefined }),
+      })
+        .then(function (r) {
+          return r.text().then(function (text) {
+            var j;
+            try {
+              j = JSON.parse(text);
+            } catch (e) {
+              j = { raw: text };
+            }
+            return { ok: r.ok, j: j };
+          });
+        })
+        .then(function (res) {
+          if (!res.ok) return;
+          if (res.j && res.j.paid) {
+            stopInfinitepayPoll();
+            markPublicVendaPaga(cartelaId, numero);
+            if (el.publicInfinitepayStatus) {
+              el.publicInfinitepayStatus.textContent = "Pagamento confirmado! Obrigado.";
+              el.publicInfinitepayStatus.classList.add("is-paid");
+            }
+            if (el.btnPublicInfinitepayOpen) {
+              el.btnPublicInfinitepayOpen.classList.add("hidden");
+            }
+          }
+        })
+        .catch(function () {});
+    }
+
+    checkOnce();
+    infinitepayPollTimer = setInterval(checkOnce, 4000);
   }
 
   function buildPicPayMerchantChargeId() {
@@ -662,7 +766,7 @@
     if (el.selectSettingsPixMode) {
       var pm = store.settings.pixPaymentMode;
       el.selectSettingsPixMode.value =
-        pm === "picpay" || pm === "asaas" ? pm : "manual";
+        pm === "picpay" || pm === "asaas" || pm === "infinitepay" ? pm : "manual";
     }
     if (el.inputSettingsPicpayProxy) el.inputSettingsPicpayProxy.value = store.settings.picpayProxyBaseUrl || "";
     togglePicpaySettingsWrap();
@@ -676,7 +780,7 @@
     if (el.inputSettingsPixCidade) store.settings.pixCidade = el.inputSettingsPixCidade.value.trim();
     if (el.selectSettingsPixMode) {
       var v = el.selectSettingsPixMode.value;
-      store.settings.pixPaymentMode = v === "picpay" || v === "asaas" ? v : "manual";
+      store.settings.pixPaymentMode = v === "picpay" || v === "asaas" || v === "infinitepay" ? v : "manual";
     }
     if (el.inputSettingsPicpayProxy) {
       store.settings.picpayProxyBaseUrl = el.inputSettingsPicpayProxy.value.trim().replace(/\/$/, "");
@@ -827,6 +931,7 @@
   }
 
   function fecharModalPublica() {
+    stopInfinitepayPoll();
     publicModalCartelaId = null;
     publicModalNumero = null;
     if (el.modalPublicReserva) el.modalPublicReserva.classList.add("hidden");
@@ -837,6 +942,11 @@
     }
     if (el.publicPixQr) el.publicPixQr.innerHTML = "";
     if (el.textareaPublicPix) el.textareaPublicPix.value = "";
+    if (el.btnPublicInfinitepayOpen) {
+      el.btnPublicInfinitepayOpen.classList.remove("hidden");
+      el.btnPublicInfinitepayOpen.href = "#";
+    }
+    setPublicPixStepMode("manual");
     setPublicPixLoading(false);
     updatePublicFormPicpayVisibility();
   }
@@ -860,7 +970,11 @@
       setPublicPixLoading(true);
       if (el.textareaPublicPix) {
         el.textareaPublicPix.value =
-          store.settings.pixPaymentMode === "asaas" ? "Gerando PIX via Asaas…" : "Gerando PIX via PicPay…";
+          store.settings.pixPaymentMode === "asaas"
+            ? "Gerando PIX via Asaas…"
+            : store.settings.pixPaymentMode === "infinitepay"
+              ? "Gerando checkout InfinitePay…"
+              : "Gerando PIX via PicPay…";
       }
       if (el.publicPixQr) el.publicPixQr.innerHTML = "";
 
@@ -873,7 +987,15 @@
       }
 
       var path =
-        store.settings.pixPaymentMode === "asaas" ? "/api/asaas/charge-pix" : "/api/picpay/charge-pix";
+        store.settings.pixPaymentMode === "asaas"
+          ? "/api/asaas/charge-pix"
+          : store.settings.pixPaymentMode === "infinitepay"
+            ? "/api/infinitepay/charge-pix"
+            : "/api/picpay/charge-pix";
+
+      var tituloCartela = c.title && String(c.title).trim() ? c.title : "Cartela";
+      var descricao =
+        "Número " + String(publicModalNumero) + " — " + tituloCartela;
 
       fetch(base + path, {
         method: "POST",
@@ -881,6 +1003,8 @@
         body: JSON.stringify({
           merchantChargeId: buildPicPayMerchantChargeId(),
           amountCents: cents,
+          description: descricao,
+          redirectUrl: location.origin + location.pathname + "#comprar",
           customer: {
             name: nome,
             email: buyer.email,
@@ -910,10 +1034,38 @@
               JSON.stringify(res.j);
             if (el.textareaPublicPix) {
               el.textareaPublicPix.value =
-                "Erro ao gerar PIX: " + String(msg).slice(0, 1200);
+                "Erro ao gerar pagamento: " + String(msg).slice(0, 1200);
             }
             return;
           }
+
+          if (store.settings.pixPaymentMode === "infinitepay" || res.j.provider === "infinitepay") {
+            setPublicPixStepMode("infinitepay");
+            var checkoutUrl = res.j.checkoutUrl || "";
+            var orderNsu = res.j.orderNsu || "";
+            var slug = res.j.slug || "";
+            if (publicModalCartelaId != null && publicModalNumero != null) {
+              var cart = getCartela(publicModalCartelaId);
+              if (cart && cart.vendas[String(publicModalNumero)]) {
+                cart.vendas[String(publicModalNumero)].infinitepay = {
+                  orderNsu: orderNsu,
+                  slug: slug,
+                };
+                saveStore();
+              }
+              startInfinitepayPoll(publicModalCartelaId, publicModalNumero, orderNsu, slug);
+            }
+            if (el.btnPublicInfinitepayOpen && checkoutUrl) {
+              el.btnPublicInfinitepayOpen.href = checkoutUrl;
+              el.btnPublicInfinitepayOpen.classList.remove("hidden");
+            }
+            if (!checkoutUrl && el.publicInfinitepayStatus) {
+              el.publicInfinitepayStatus.textContent = "Não foi possível obter o link de pagamento.";
+            }
+            return;
+          }
+
+          setPublicPixStepMode("manual");
           var qr = extractPixQrFromPicPayResponse(res.j);
           var qrPayload = qr.qrCode;
           var b64 = qr.qrCodeBase64;
@@ -947,6 +1099,8 @@
         });
       return;
     }
+
+    setPublicPixStepMode("manual");
 
     var txid = "S" + String(publicModalNumero) + "T" + Date.now().toString(36).toUpperCase().slice(-12);
     var payload = buildPixCopiaECola({
@@ -1009,7 +1163,7 @@
         if (el.inputPublicEmail) el.inputPublicEmail.focus();
         return;
       }
-      if (cpfDigits.length !== 11) {
+      if (cpfDigits.length !== 11 && !isInfinitepayMode()) {
         alert("Informe o CPF com 11 dígitos (exigido pelo provedor de pagamento).");
         if (el.inputPublicCpf) el.inputPublicCpf.focus();
         return;
@@ -1788,6 +1942,19 @@
     el.inputNome.value = venda ? venda.nome : "";
     el.inputPago.checked = venda ? !!venda.pago : true;
     el.btnRemoverVenda.classList.toggle("hidden", !venda);
+    if (el.btnVendaVerificarInfinitepay) {
+      var showVerify =
+        venda &&
+        !venda.pago &&
+        venda.infinitepay &&
+        venda.infinitepay.orderNsu &&
+        isInfinitepayMode();
+      el.btnVendaVerificarInfinitepay.classList.toggle("hidden", !showVerify);
+    }
+    if (el.vendaInfinitepayHint) {
+      el.vendaInfinitepayHint.classList.add("hidden");
+      el.vendaInfinitepayHint.textContent = "";
+    }
 
     buildSelectAplicarPreco(c);
     if (venda && typeof venda.valor === "number") {
@@ -1806,6 +1973,66 @@
     el.modalVenda.classList.add("hidden");
     el.modalOverlay.classList.add("hidden");
     modalNumeroAtual = null;
+  }
+
+  function verificarInfinitepayVendaAdmin() {
+    var c = getActiveCartela();
+    if (!c || modalNumeroAtual == null) return;
+    var venda = c.vendas[String(modalNumeroAtual)];
+    if (!venda || !venda.infinitepay || !venda.infinitepay.orderNsu) return;
+    var base = String(store.settings.picpayProxyBaseUrl || "").replace(/\/$/, "");
+    if (!base) {
+      alert("Configure a URL do servidor no painel (Senha, PIX e aviso de segurança).");
+      return;
+    }
+    if (el.vendaInfinitepayHint) {
+      el.vendaInfinitepayHint.classList.remove("hidden");
+      el.vendaInfinitepayHint.textContent = "Consultando InfinitePay…";
+    }
+    fetch(base + "/api/infinitepay/payment-check", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        order_nsu: venda.infinitepay.orderNsu,
+        slug: venda.infinitepay.slug || undefined,
+      }),
+    })
+      .then(function (r) {
+        return r.text().then(function (text) {
+          var j;
+          try {
+            j = JSON.parse(text);
+          } catch (e) {
+            j = { raw: text };
+          }
+          return { ok: r.ok, j: j };
+        });
+      })
+      .then(function (res) {
+        if (!el.vendaInfinitepayHint) return;
+        if (!res.ok) {
+          el.vendaInfinitepayHint.textContent = "Erro ao consultar pagamento.";
+          return;
+        }
+        if (res.j && res.j.paid) {
+          venda.pago = true;
+          saveStore();
+          el.inputPago.checked = true;
+          el.vendaInfinitepayHint.textContent = "Pagamento confirmado pela InfinitePay.";
+          if (el.btnVendaVerificarInfinitepay) el.btnVendaVerificarInfinitepay.classList.add("hidden");
+          renderGrid();
+          updateToolbar();
+          updateFinancePanel();
+          renderListaCartelas();
+        } else {
+          el.vendaInfinitepayHint.textContent = "Ainda não consta pagamento. Tente novamente em instantes.";
+        }
+      })
+      .catch(function () {
+        if (el.vendaInfinitepayHint) {
+          el.vendaInfinitepayHint.textContent = "Não foi possível consultar o servidor.";
+        }
+      });
   }
 
   function onSubmitVenda(ev) {
@@ -2198,6 +2425,9 @@
   el.formVenda.addEventListener("submit", onSubmitVenda);
   el.btnCancelarVenda.addEventListener("click", fecharModalVenda);
   el.btnRemoverVenda.addEventListener("click", onRemoverVenda);
+  if (el.btnVendaVerificarInfinitepay) {
+    el.btnVendaVerificarInfinitepay.addEventListener("click", verificarInfinitepayVendaAdmin);
+  }
   el.btnSortear.addEventListener("click", abrirSorteio);
   el.btnFecharSorteio.addEventListener("click", fecharSorteio);
   el.btnNovaCartela.addEventListener("click", onNovaCartela);
