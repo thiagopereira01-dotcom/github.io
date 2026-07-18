@@ -162,6 +162,16 @@ function respondPixCompatible(res, qrPayload, encodedImage) {
   });
 }
 
+app.get("/", function (_req, res) {
+  res.json({
+    ok: true,
+    service: "cartela-gateway-pix",
+    message: "Servidor ativo. Use GET /api/health para diagnóstico.",
+    health: "/api/health",
+    infinitepay: !!getInfinitepayHandle(),
+  });
+});
+
 app.get("/api/health", function (_req, res) {
   res.json({
     ok: true,
